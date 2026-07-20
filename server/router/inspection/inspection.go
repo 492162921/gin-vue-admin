@@ -9,4 +9,6 @@ func (r *InspectionRouter) InitInspectionRouter(Router *gin.RouterGroup) {
 	{
 		g.GET("ping", healthStubApi.Ping)
 	}
+	(&ClusterRouter{}).InitClusterRouter(Router)
+	(&RuleRouter{}).InitRuleRouter(Router)
 }

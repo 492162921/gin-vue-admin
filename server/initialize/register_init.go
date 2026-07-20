@@ -1,6 +1,7 @@
 package initialize
 
 import (
+	_ "github.com/flipped-aurora/gin-vue-admin/server/source/inspection"
 	_ "github.com/flipped-aurora/gin-vue-admin/server/source/media"
 	_ "github.com/flipped-aurora/gin-vue-admin/server/source/system"
 )
