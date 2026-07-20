@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |:---|:---|
 | 日期 | 2026-07-20 |
-| 状态 | 已评审（待实现计划） |
+| 状态 | 已落地（`feat/k8s-inspection`，2026-07-20 验证通过） |
 | 源项目 | `D:\项目\曜石\20260521-vibecoding\k8s-inspection-platform` |
 | 目标仓库 | `D:\GoProjects\gin-vue-admin` |
 
