@@ -18,6 +18,7 @@
   "/src/view/init/index.vue": "Init",
   "/src/view/inspection/cluster.vue": "InspectionCluster",
   "/src/view/inspection/rule.vue": "InspectionRule",
+  "/src/view/inspection/task.vue": "InspectionTask",
   "/src/view/layout/aside/CollapseBar.vue": "AsideCollapseBar",
   "/src/view/layout/aside/combinationMode.vue": "AsideCombinationMode",
   "/src/view/layout/aside/headMode.vue": "AsideHeadMode",

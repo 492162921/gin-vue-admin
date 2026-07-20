@@ -28,3 +28,15 @@ export const getRuleList = (params) =>
   request('/inspection/rule/list', 'get', undefined, params)
 export const setRuleEnabled = (data) =>
   request('/inspection/rule/enabled', 'post', data)
+
+export const createTask = (data) => request('/inspection/task', 'post', data)
+export const updateTask = (id, data) =>
+  request('/inspection/task', 'put', data, { id })
+export const deleteTask = (data) => request('/inspection/task', 'delete', data)
+export const getTask = (params) =>
+  request('/inspection/task', 'get', undefined, params)
+export const getTaskList = (params) =>
+  request('/inspection/task/list', 'get', undefined, params)
+export const runTask = (data) => request('/inspection/task/run', 'post', data)
+export const getTaskInspections = (params) =>
+  request('/inspection/task/inspections', 'get', undefined, params)

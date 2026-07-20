@@ -8,9 +8,11 @@ type ApiGroup struct {
 	HealthStubApi
 	ClusterApi
 	RuleApi
+	TaskApi
 }
 
 var (
 	clusterService = service.ServiceGroupApp.InspectionServiceGroup.ClusterService
 	ruleService    = service.ServiceGroupApp.InspectionServiceGroup.RuleService
+	taskService    = service.ServiceGroupApp.InspectionServiceGroup.TaskService
 )
