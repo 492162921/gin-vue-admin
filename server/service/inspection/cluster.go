@@ -22,7 +22,10 @@ func (s *ClusterService) Create(ctx context.Context, name string, kubeconfigByte
 		return nil, err
 	}
 	cluster := inspModel.InspCluster{Name: name, KubeconfigPath: path, Status: "unknown"}
-	s.probe(ctx, &cluster)
+	if err := s.probe(ctx, &cluster); err != nil {
+		_ = os.Remove(path)
+		return nil, err
+	}
 	if err := global.GVA_DB.WithContext(ctx).Create(&cluster).Error; err != nil {
 		_ = os.Remove(path)
 		return nil, err
@@ -35,7 +38,12 @@ func (s *ClusterService) Refresh(ctx context.Context, id uint) (*inspModel.InspC
 	if err != nil {
 		return nil, err
 	}
-	s.probe(ctx, cluster)
+	if err := s.probe(ctx, cluster); err != nil {
+		if saveErr := global.GVA_DB.WithContext(ctx).Save(cluster).Error; saveErr != nil {
+			return nil, saveErr
+		}
+		return nil, err
+	}
 	if err := global.GVA_DB.WithContext(ctx).Save(cluster).Error; err != nil {
 		return nil, err
 	}
@@ -83,7 +91,10 @@ func (s *ClusterService) Update(ctx context.Context, id uint, input inspRequest.
 		}
 		oldPath := cluster.KubeconfigPath
 		cluster.KubeconfigPath = path
-		s.probe(ctx, cluster)
+		if err := s.probe(ctx, cluster); err != nil {
+			_ = os.Remove(path)
+			return nil, err
+		}
 		if err := global.GVA_DB.WithContext(ctx).Save(cluster).Error; err != nil {
 			_ = os.Remove(path)
 			return nil, err
@@ -129,13 +140,13 @@ func (s *ClusterService) ListNamespaces(ctx context.Context, id uint) ([]k8s.Nam
 	return k8s.NewInspector(cluster.KubeconfigPath, global.GVA_CONFIG.Inspection.ForceStub).ListNamespaces(ctx)
 }
 
-func (s *ClusterService) probe(ctx context.Context, cluster *inspModel.InspCluster) {
+func (s *ClusterService) probe(ctx context.Context, cluster *inspModel.InspCluster) error {
 	inspector := k8s.NewInspector(cluster.KubeconfigPath, global.GVA_CONFIG.Inspection.ForceStub)
 	if err := inspector.TestConnection(ctx); err != nil {
 		cluster.Status = "unreachable"
 		cluster.K8sVersion = ""
 		cluster.NodeCount = 0
-		return
+		return fmt.Errorf("集群连接或 kubeconfig 验证失败: %w", err)
 	}
 	cluster.Status = "available"
 	cluster.K8sVersion, _ = inspector.GetVersion(ctx)
@@ -143,6 +154,7 @@ func (s *ClusterService) probe(ctx context.Context, cluster *inspModel.InspClust
 	if err == nil {
 		cluster.NodeCount = len(nodes)
 	}
+	return nil
 }
 
 func saveKubeconfig(contents []byte) (string, error) {

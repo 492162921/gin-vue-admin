@@ -5,6 +5,6 @@ type Inspection struct {
 	ForceStub     bool   `mapstructure:"force-stub" json:"forceStub" yaml:"force-stub"`
 	WebhookURL    string `mapstructure:"webhook-url" json:"webhookUrl" yaml:"webhook-url"`
 	AIBaseURL     string `mapstructure:"ai-base-url" json:"aiBaseUrl" yaml:"ai-base-url"`
-	AIAPIKey      string `mapstructure:"ai-api-key" json:"aiApiKey" yaml:"ai-api-key"`
+	AIAPIKey      string `mapstructure:"ai-api-key" json:"-" yaml:"ai-api-key"`
 	AIModel       string `mapstructure:"ai-model" json:"aiModel" yaml:"ai-model"`
 }

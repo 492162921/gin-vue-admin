@@ -13,13 +13,13 @@
       <el-col :xs="24" :lg="14">
         <el-card shadow="never" class="chart-card">
           <template #header>近 7 天异常趋势</template>
-          <Chart height="320px" :option="trendOption" />
+          <Chart height="320px" :options="trendOption" />
         </el-card>
       </el-col>
       <el-col :xs="24" :lg="10">
         <el-card shadow="never" class="chart-card">
           <template #header>告警级别分布</template>
-          <Chart height="320px" :option="levelOption" />
+          <Chart height="320px" :options="levelOption" />
         </el-card>
       </el-col>
     </el-row>
@@ -28,13 +28,13 @@
       <el-col :xs="24" :lg="14">
         <el-card shadow="never" class="chart-card">
           <template #header>集群 CPU / 内存使用率</template>
-          <Chart height="320px" :option="usageOption" />
+          <Chart height="320px" :options="usageOption" />
         </el-card>
       </el-col>
       <el-col :xs="24" :lg="10">
         <el-card shadow="never" class="chart-card">
           <template #header>集群告警分布</template>
-          <Chart height="320px" :option="clusterOption" />
+          <Chart height="320px" :options="clusterOption" />
         </el-card>
       </el-col>
     </el-row>

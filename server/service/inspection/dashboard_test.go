@@ -50,10 +50,10 @@ func TestDashboardServiceReturnsSeededMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("alert distribution: %v", err)
 	}
-	if len(distribution.ByLevel) != 2 || distribution.ByLevel[0].Name != "critical" || distribution.ByLevel[0].Count != 1 {
+	if len(distribution.ByLevel) != 1 || distribution.ByLevel[0].Name != "critical" || distribution.ByLevel[0].Count != 1 {
 		t.Fatalf("alert level distribution = %#v", distribution.ByLevel)
 	}
-	if len(distribution.ByCluster) != 1 || distribution.ByCluster[0].Name != "生产集群" || distribution.ByCluster[0].Count != 2 {
+	if len(distribution.ByCluster) != 1 || distribution.ByCluster[0].Name != "生产集群" || distribution.ByCluster[0].Count != 1 {
 		t.Fatalf("alert cluster distribution = %#v", distribution.ByCluster)
 	}
 }

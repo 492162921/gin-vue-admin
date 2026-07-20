@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"context"
+	"fmt"
 	"os"
 )
 
@@ -47,14 +48,38 @@ type Inspector interface {
 	ListNamespaces(ctx context.Context) ([]NamespaceInfo, error)
 }
 
-// NewInspector 优先使用真实 kubeconfig；forceStub、环境变量 K8S_FORCE_STUB=1 或路径无效时回退 Stub。
+// NewInspector 优先使用真实 kubeconfig；仅 forceStub 或 K8S_FORCE_STUB=1 时使用 Stub。
 func NewInspector(kubeconfigPath string, forceStub bool) Inspector {
 	if forceStub || os.Getenv("K8S_FORCE_STUB") == "1" {
 		return newStubInspector(true)
 	}
 	client, err := newClientInspector(kubeconfigPath)
 	if err != nil {
-		return newStubInspector(true)
+		return &errorInspector{err: err}
 	}
 	return client
+}
+
+type errorInspector struct {
+	err error
+}
+
+func (i *errorInspector) TestConnection(context.Context) error {
+	return fmt.Errorf("invalid kubeconfig: %w", i.err)
+}
+
+func (i *errorInspector) GetVersion(context.Context) (string, error) {
+	return "", i.TestConnection(context.Background())
+}
+
+func (i *errorInspector) ListNodes(context.Context) ([]NodeInfo, error) {
+	return nil, i.TestConnection(context.Background())
+}
+
+func (i *errorInspector) ListPods(context.Context, string) ([]PodInfo, error) {
+	return nil, i.TestConnection(context.Background())
+}
+
+func (i *errorInspector) ListNamespaces(context.Context) ([]NamespaceInfo, error) {
+	return nil, i.TestConnection(context.Background())
 }

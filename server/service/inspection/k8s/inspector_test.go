@@ -30,10 +30,10 @@ func TestForceStubIgnoresBadPath(t *testing.T) {
 	}
 }
 
-func TestBadKubeconfigFallsBackToStub(t *testing.T) {
+func TestBadKubeconfigReturnsConnectionError(t *testing.T) {
 	ins := NewInspector("Z:\\not-exist\\kubeconfig", false)
-	if err := ins.TestConnection(context.Background()); err != nil {
-		t.Fatal(err)
+	if err := ins.TestConnection(context.Background()); err == nil {
+		t.Fatal("invalid kubeconfig must not be reported as connected")
 	}
 }
 
@@ -83,7 +83,7 @@ func TestStubGetVersion(t *testing.T) {
 func TestEnvForceStubUnset(t *testing.T) {
 	os.Unsetenv("K8S_FORCE_STUB")
 	ins := NewInspector("Z:\\not-exist\\kubeconfig", false)
-	if err := ins.TestConnection(context.Background()); err != nil {
-		t.Fatal(err)
+	if err := ins.TestConnection(context.Background()); err == nil {
+		t.Fatal("invalid kubeconfig must not be reported as connected")
 	}
 }

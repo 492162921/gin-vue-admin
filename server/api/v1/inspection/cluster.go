@@ -29,7 +29,7 @@ func (a *ClusterApi) Create(c *gin.Context) {
 	}
 	cluster, err := clusterService.Create(c.Request.Context(), input.Name, []byte(input.Kubeconfig))
 	if err != nil {
-		response.FailWithMessage("创建集群失败", c)
+		response.FailWithMessage(err.Error(), c)
 		return
 	}
 	response.OkWithData(cluster, c)
@@ -58,7 +58,7 @@ func (a *ClusterApi) Update(c *gin.Context) {
 	}
 	cluster, err := clusterService.Update(c.Request.Context(), id.ID, input)
 	if err != nil {
-		response.FailWithMessage("更新集群失败", c)
+		response.FailWithMessage(err.Error(), c)
 		return
 	}
 	response.OkWithData(cluster, c)
@@ -149,7 +149,7 @@ func (a *ClusterApi) Refresh(c *gin.Context) {
 	}
 	cluster, err := clusterService.Refresh(c.Request.Context(), input.ID)
 	if err != nil {
-		response.FailWithMessage("刷新集群失败", c)
+		response.FailWithMessage(err.Error(), c)
 		return
 	}
 	response.OkWithData(cluster, c)

@@ -147,6 +147,7 @@ func (s *DashboardService) AlertDistribution(ctx context.Context) (DashboardAler
 	}
 	if err := db.Model(&inspModel.InspAlert{}).
 		Select("level AS name, COUNT(*) AS count").
+		Where("status <> ?", "closed").
 		Group("level").
 		Order("level ASC").
 		Scan(&result.ByLevel).Error; err != nil {
@@ -157,6 +158,7 @@ func (s *DashboardService) AlertDistribution(ctx context.Context) (DashboardAler
 		Joins("JOIN insp_inspections ON insp_inspections.id = insp_alerts.inspection_id").
 		Joins("JOIN insp_tasks ON insp_tasks.id = insp_inspections.task_id").
 		Joins("JOIN insp_clusters ON insp_clusters.id = insp_tasks.cluster_id").
+		Where("insp_alerts.status <> ?", "closed").
 		Group("insp_clusters.id, insp_clusters.name").
 		Order("insp_clusters.name ASC").
 		Scan(&result.ByCluster).Error; err != nil {
