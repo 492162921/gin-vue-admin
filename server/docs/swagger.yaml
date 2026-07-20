@@ -856,6 +856,53 @@ definitions:
         description: 收件人:多个以英文逗号分隔 例：a@qq.com b@qq.com 正式开发中请把此项目作为参数使用
         type: string
     type: object
+  inspection.DashboardAlertDistribution:
+    properties:
+      byCluster:
+        items:
+          $ref: '#/definitions/inspection.DashboardDistributionItem'
+        type: array
+      byLevel:
+        items:
+          $ref: '#/definitions/inspection.DashboardDistributionItem'
+        type: array
+    type: object
+  inspection.DashboardDistributionItem:
+    properties:
+      count:
+        type: integer
+      name:
+        type: string
+    type: object
+  inspection.DashboardResourceUsage:
+    properties:
+      clusterId:
+        type: integer
+      clusterName:
+        type: string
+      cpuUsage:
+        type: number
+      memoryUsage:
+        type: number
+    type: object
+  inspection.DashboardSummary:
+    properties:
+      clusterCount:
+        type: integer
+      nodeCount:
+        type: integer
+      openAlertCount:
+        type: integer
+      todayInspectionCount:
+        type: integer
+    type: object
+  inspection.DashboardTrendItem:
+    properties:
+      anomalyCount:
+        type: integer
+      date:
+        type: string
+    type: object
   inspection.InspAlert:
     properties:
       ID:
@@ -6933,6 +6980,99 @@ paths:
       summary: 刷新巡检集群状态
       tags:
       - InspCluster
+  /inspection/dashboard/alertDistribution:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 告警分布
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.DashboardAlertDistribution'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 获取巡检告警分布
+      tags:
+      - InspDashboard
+  /inspection/dashboard/inspectionTrend:
+    get:
+      parameters:
+      - description: 统计天数，默认 7，最大 90
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 异常趋势
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/inspection.DashboardTrendItem'
+                  type: array
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 获取每日巡检异常趋势
+      tags:
+      - InspDashboard
+  /inspection/dashboard/resourceUsage:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 资源使用率
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/inspection.DashboardResourceUsage'
+                  type: array
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 获取最近巡检的集群资源使用率
+      tags:
+      - InspDashboard
+  /inspection/dashboard/summary:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统计数据
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.DashboardSummary'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 获取巡检总览统计
+      tags:
+      - InspDashboard
   /inspection/ping:
     get:
       produces:

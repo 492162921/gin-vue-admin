@@ -11,12 +11,14 @@ type ApiGroup struct {
 	TaskApi
 	AlertApi
 	ReportApi
+	DashboardApi
 }
 
 var (
-	clusterService = service.ServiceGroupApp.InspectionServiceGroup.ClusterService
-	ruleService    = service.ServiceGroupApp.InspectionServiceGroup.RuleService
-	taskService    = service.ServiceGroupApp.InspectionServiceGroup.TaskService
-	alertService   = service.ServiceGroupApp.InspectionServiceGroup.AlertService
-	reportService  = service.ServiceGroupApp.InspectionServiceGroup.ReportService
+	clusterService   = service.ServiceGroupApp.InspectionServiceGroup.ClusterService
+	ruleService      = service.ServiceGroupApp.InspectionServiceGroup.RuleService
+	taskService      = service.ServiceGroupApp.InspectionServiceGroup.TaskService
+	alertService     = service.ServiceGroupApp.InspectionServiceGroup.AlertService
+	reportService    = service.ServiceGroupApp.InspectionServiceGroup.ReportService
+	dashboardService = service.ServiceGroupApp.InspectionServiceGroup.DashboardService
 )

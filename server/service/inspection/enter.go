@@ -6,4 +6,5 @@ type ServiceGroup struct {
 	TaskService
 	AlertService
 	ReportService
+	DashboardService
 }

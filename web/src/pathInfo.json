@@ -18,6 +18,7 @@
   "/src/view/init/index.vue": "Init",
   "/src/view/inspection/alert.vue": "InspectionAlert",
   "/src/view/inspection/cluster.vue": "InspectionCluster",
+  "/src/view/inspection/dashboard.vue": "InspectionDashboard",
   "/src/view/inspection/report.vue": "InspectionReport",
   "/src/view/inspection/rule.vue": "InspectionRule",
   "/src/view/inspection/task.vue": "InspectionTask",

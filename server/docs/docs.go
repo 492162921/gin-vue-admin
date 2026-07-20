@@ -6027,6 +6027,176 @@ const docTemplate = `{
                 }
             }
         },
+        "/inspection/dashboard/alertDistribution": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "InspDashboard"
+                ],
+                "summary": "获取巡检告警分布",
+                "responses": {
+                    "200": {
+                        "description": "告警分布",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/inspection.DashboardAlertDistribution"
+                                        },
+                                        "msg": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/inspection/dashboard/inspectionTrend": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "InspDashboard"
+                ],
+                "summary": "获取每日巡检异常趋势",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "统计天数，默认 7，最大 90",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "异常趋势",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/inspection.DashboardTrendItem"
+                                            }
+                                        },
+                                        "msg": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/inspection/dashboard/resourceUsage": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "InspDashboard"
+                ],
+                "summary": "获取最近巡检的集群资源使用率",
+                "responses": {
+                    "200": {
+                        "description": "资源使用率",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/inspection.DashboardResourceUsage"
+                                            }
+                                        },
+                                        "msg": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/inspection/dashboard/summary": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "InspDashboard"
+                ],
+                "summary": "获取巡检总览统计",
+                "responses": {
+                    "200": {
+                        "description": "统计数据",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/response.Response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/inspection.DashboardSummary"
+                                        },
+                                        "msg": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/inspection/ping": {
             "get": {
                 "security": [
@@ -16213,6 +16383,79 @@ const docTemplate = `{
                 },
                 "to": {
                     "description": "收件人:多个以英文逗号分隔 例：a@qq.com b@qq.com 正式开发中请把此项目作为参数使用",
+                    "type": "string"
+                }
+            }
+        },
+        "inspection.DashboardAlertDistribution": {
+            "type": "object",
+            "properties": {
+                "byCluster": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/inspection.DashboardDistributionItem"
+                    }
+                },
+                "byLevel": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/inspection.DashboardDistributionItem"
+                    }
+                }
+            }
+        },
+        "inspection.DashboardDistributionItem": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "inspection.DashboardResourceUsage": {
+            "type": "object",
+            "properties": {
+                "clusterId": {
+                    "type": "integer"
+                },
+                "clusterName": {
+                    "type": "string"
+                },
+                "cpuUsage": {
+                    "type": "number"
+                },
+                "memoryUsage": {
+                    "type": "number"
+                }
+            }
+        },
+        "inspection.DashboardSummary": {
+            "type": "object",
+            "properties": {
+                "clusterCount": {
+                    "type": "integer"
+                },
+                "nodeCount": {
+                    "type": "integer"
+                },
+                "openAlertCount": {
+                    "type": "integer"
+                },
+                "todayInspectionCount": {
+                    "type": "integer"
+                }
+            }
+        },
+        "inspection.DashboardTrendItem": {
+            "type": "object",
+            "properties": {
+                "anomalyCount": {
+                    "type": "integer"
+                },
+                "date": {
                     "type": "string"
                 }
             }

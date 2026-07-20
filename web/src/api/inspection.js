@@ -59,3 +59,12 @@ export const pushReport = (data) =>
   request('/inspection/report/push', 'post', data)
 export const deleteReport = (data) =>
   request('/inspection/report', 'delete', data)
+
+export const getDashboardSummary = () =>
+  request('/inspection/dashboard/summary', 'get')
+export const getDashboardResourceUsage = () =>
+  request('/inspection/dashboard/resourceUsage', 'get')
+export const getDashboardInspectionTrend = (params) =>
+  request('/inspection/dashboard/inspectionTrend', 'get', undefined, params)
+export const getDashboardAlertDistribution = () =>
+  request('/inspection/dashboard/alertDistribution', 'get')

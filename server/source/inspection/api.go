@@ -57,6 +57,10 @@ func (i *initAPI) DataInserted(ctx context.Context) bool {
 
 func inspectionAPIs() []sysModel.SysApi {
 	return []sysModel.SysApi{
+		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/dashboard/summary", Description: "获取巡检总览统计"},
+		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/dashboard/resourceUsage", Description: "获取集群资源使用率"},
+		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/dashboard/inspectionTrend", Description: "获取巡检异常趋势"},
+		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/dashboard/alertDistribution", Description: "获取巡检告警分布"},
 		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/cluster", Description: "创建巡检集群"},
 		{ApiGroup: "K8s巡检", Method: "PUT", Path: "/inspection/cluster", Description: "更新巡检集群"},
 		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/cluster", Description: "删除巡检集群"},

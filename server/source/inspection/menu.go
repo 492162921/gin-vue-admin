@@ -45,15 +45,19 @@ func (i *initMenu) InitializeData(ctx context.Context) (context.Context, error) 
 		return ctx, errors.Wrap(err, "初始化巡检父菜单失败")
 	}
 	children := []sysModel.SysBaseMenu{
-		{MenuLevel: 1, ParentId: parent.ID, Path: "cluster", Name: "inspectionCluster", Component: "view/inspection/cluster.vue", Sort: 1, Meta: sysModel.Meta{Title: "集群管理", Icon: "connection"}},
-		{MenuLevel: 1, ParentId: parent.ID, Path: "rule", Name: "inspectionRule", Component: "view/inspection/rule.vue", Sort: 2, Meta: sysModel.Meta{Title: "巡检规则", Icon: "set-up"}},
-		{MenuLevel: 1, ParentId: parent.ID, Path: "task", Name: "inspectionTask", Component: "view/inspection/task.vue", Sort: 3, Meta: sysModel.Meta{Title: "巡检任务", Icon: "calendar"}},
-		{MenuLevel: 1, ParentId: parent.ID, Path: "alert", Name: "inspectionAlert", Component: "view/inspection/alert.vue", Sort: 4, Meta: sysModel.Meta{Title: "巡检告警", Icon: "warning"}},
-		{MenuLevel: 1, ParentId: parent.ID, Path: "report", Name: "inspectionReport", Component: "view/inspection/report.vue", Sort: 5, Meta: sysModel.Meta{Title: "巡检报告", Icon: "document"}},
+		{MenuLevel: 1, ParentId: parent.ID, Path: "dashboard", Name: "inspectionDashboard", Component: "view/inspection/dashboard.vue", Sort: 1, Meta: sysModel.Meta{Title: "巡检总览", Icon: "monitor-gva"}},
+		{MenuLevel: 1, ParentId: parent.ID, Path: "cluster", Name: "inspectionCluster", Component: "view/inspection/cluster.vue", Sort: 2, Meta: sysModel.Meta{Title: "集群管理", Icon: "connection"}},
+		{MenuLevel: 1, ParentId: parent.ID, Path: "rule", Name: "inspectionRule", Component: "view/inspection/rule.vue", Sort: 3, Meta: sysModel.Meta{Title: "巡检规则", Icon: "set-up"}},
+		{MenuLevel: 1, ParentId: parent.ID, Path: "task", Name: "inspectionTask", Component: "view/inspection/task.vue", Sort: 4, Meta: sysModel.Meta{Title: "巡检任务", Icon: "calendar"}},
+		{MenuLevel: 1, ParentId: parent.ID, Path: "alert", Name: "inspectionAlert", Component: "view/inspection/alert.vue", Sort: 5, Meta: sysModel.Meta{Title: "巡检告警", Icon: "warning"}},
+		{MenuLevel: 1, ParentId: parent.ID, Path: "report", Name: "inspectionReport", Component: "view/inspection/report.vue", Sort: 6, Meta: sysModel.Meta{Title: "巡检报告", Icon: "document"}},
 	}
 	for _, menu := range children {
 		if err := db.Where("name = ?", menu.Name).FirstOrCreate(&menu).Error; err != nil {
 			return ctx, errors.Wrap(err, "初始化巡检子菜单失败")
+		}
+		if err := db.Model(&sysModel.SysBaseMenu{}).Where("name = ?", menu.Name).Update("sort", menu.Sort).Error; err != nil {
+			return ctx, errors.Wrap(err, "更新巡检子菜单排序失败")
 		}
 	}
 	var admin sysModel.SysAuthority
@@ -72,5 +76,5 @@ func (i *initMenu) DataInserted(ctx context.Context) bool {
 	if !ok {
 		return false
 	}
-	return db.Where("name = ?", "inspectionReport").First(&sysModel.SysBaseMenu{}).Error == nil
+	return db.Where("name = ?", "inspectionDashboard").First(&sysModel.SysBaseMenu{}).Error == nil
 }

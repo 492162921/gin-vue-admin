@@ -11,6 +11,7 @@ type RouterGroup struct {
 	TaskRouter
 	AlertRouter
 	ReportRouter
+	DashboardRouter
 }
 
 var (
@@ -20,4 +21,5 @@ var (
 	taskApi       = api.ApiGroupApp.InspectionApiGroup.TaskApi
 	alertApi      = api.ApiGroupApp.InspectionApiGroup.AlertApi
 	reportApi     = api.ApiGroupApp.InspectionApiGroup.ReportApi
+	dashboardApi  = api.ApiGroupApp.InspectionApiGroup.DashboardApi
 )
