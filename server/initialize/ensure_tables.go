@@ -4,6 +4,7 @@ import (
 	"context"
 	adapter "github.com/casbin/gorm-adapter/v3"
 	"github.com/flipped-aurora/gin-vue-admin/server/model/example"
+	"github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
 	"github.com/flipped-aurora/gin-vue-admin/server/model/media"
 	sysModel "github.com/flipped-aurora/gin-vue-admin/server/model/system"
 	"github.com/flipped-aurora/gin-vue-admin/server/plugin/announcement/model"
@@ -66,6 +67,15 @@ func (e *ensureTables) MigrateTable(ctx context.Context) (context.Context, error
 		media.FileUploadAndDownload{},
 		media.AttachmentCategory{},
 
+		inspection.InspCluster{},
+		inspection.InspRule{},
+		inspection.InspTask{},
+		inspection.InspTaskRule{},
+		inspection.InspInspection{},
+		inspection.InspInspectionDetail{},
+		inspection.InspAlert{},
+		inspection.InspReport{},
+
 		model.Info{},
 	}
 	for _, t := range tables {
@@ -106,6 +116,15 @@ func (e *ensureTables) TableCreated(ctx context.Context) bool {
 		media.MediaUploadChunk{},
 		media.FileUploadAndDownload{},
 		media.AttachmentCategory{},
+
+		inspection.InspCluster{},
+		inspection.InspRule{},
+		inspection.InspTask{},
+		inspection.InspTaskRule{},
+		inspection.InspInspection{},
+		inspection.InspInspectionDetail{},
+		inspection.InspAlert{},
+		inspection.InspReport{},
 
 		model.Info{},
 	}

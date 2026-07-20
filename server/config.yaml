@@ -294,3 +294,11 @@ mcp:
     version: v1.0.0
     addr: 8889
     separate: false
+
+inspection:
+  kube-config-dir: uploads/kubeconfigs
+  force-stub: false
+  webhook-url: ""
+  ai-base-url: ""
+  ai-api-key: ""
+  ai-model: ""

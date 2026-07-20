@@ -32,6 +32,8 @@ type Server struct {
 
 	Media Media `mapstructure:"media" json:"media" yaml:"media"`
 
+	Inspection Inspection `mapstructure:"inspection" json:"inspection" yaml:"inspection"`
+
 	DiskList []DiskList `mapstructure:"disk-list" json:"disk-list" yaml:"disk-list"`
 
 	// 跨域配置

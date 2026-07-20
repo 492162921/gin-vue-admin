@@ -5,6 +5,7 @@ import (
 
 	"github.com/flipped-aurora/gin-vue-admin/server/global"
 	"github.com/flipped-aurora/gin-vue-admin/server/model/example"
+	"github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
 	"github.com/flipped-aurora/gin-vue-admin/server/model/media"
 	"github.com/flipped-aurora/gin-vue-admin/server/model/system"
 	"github.com/flipped-aurora/gin-vue-admin/server/utils/logger"
@@ -79,6 +80,15 @@ func RegisterTables() {
 		media.MediaUploadChunk{},
 		media.FileUploadAndDownload{},
 		media.AttachmentCategory{},
+
+		inspection.InspCluster{},
+		inspection.InspRule{},
+		inspection.InspTask{},
+		inspection.InspTaskRule{},
+		inspection.InspInspection{},
+		inspection.InspInspectionDetail{},
+		inspection.InspAlert{},
+		inspection.InspReport{},
 	)
 	if err != nil {
 		logger.Bg().Mod("system").Err(err).Error("register table failed")

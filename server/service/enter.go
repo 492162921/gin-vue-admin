@@ -2,6 +2,7 @@ package service
 
 import (
 	"github.com/flipped-aurora/gin-vue-admin/server/service/example"
+	"github.com/flipped-aurora/gin-vue-admin/server/service/inspection"
 	"github.com/flipped-aurora/gin-vue-admin/server/service/media"
 	"github.com/flipped-aurora/gin-vue-admin/server/service/system"
 )
@@ -9,7 +10,8 @@ import (
 var ServiceGroupApp = new(ServiceGroup)
 
 type ServiceGroup struct {
-	SystemServiceGroup  system.ServiceGroup
-	ExampleServiceGroup example.ServiceGroup
-	MediaServiceGroup   media.ServiceGroup
+	SystemServiceGroup     system.ServiceGroup
+	ExampleServiceGroup    example.ServiceGroup
+	MediaServiceGroup      media.ServiceGroup
+	InspectionServiceGroup inspection.ServiceGroup
 }
