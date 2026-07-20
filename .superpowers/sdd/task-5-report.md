@@ -6,3 +6,4 @@
 - Regenerated Swagger documents.
 - Verified: `go test ./service/inspection/ -count=1` and `npm run lint -- --quiet`.
 - `go test ./... -count=1` remains blocked by unrelated existing MCP localhost, AI plugin rendering, auto router, and system template test failures.
+- P2 fix: tightened alert list `@Success` to `response.PageResult{list=[]inspection.InspAlert}`; regenerated Swagger; verified `go test ./service/inspection/ -count=1` and `go build`.

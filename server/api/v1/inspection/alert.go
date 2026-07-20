@@ -18,7 +18,7 @@ type AlertApi struct{}
 // @Security  ApiKeyAuth
 // @Produce   application/json
 // @Param     data  query     inspRequest.AlertSearch                                true  "分页与筛选条件"
-// @Success   200   {object}  response.Response{data=response.PageResult,msg=string}  "告警列表"
+// @Success   200   {object}  response.Response{data=response.PageResult{list=[]inspection.InspAlert},msg=string}  "告警列表"
 // @Router    /inspection/alert/list [get]
 func (a *AlertApi) List(c *gin.Context) {
 	var search inspRequest.AlertSearch
