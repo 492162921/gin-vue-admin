@@ -78,6 +78,47 @@ func NotifyWebhook(webhookURL string, payload AlertWebhookPayload) error {
 	return nil
 }
 
+func NotifyReportWebhook(webhookURL, title, digest string) error {
+	webhookURL = strings.TrimSpace(webhookURL)
+	if webhookURL == "" {
+		return nil
+	}
+	content := fmt.Sprintf("【日志】【信息】K8s 巡检报告\n标题: %s\n摘要: %s", displayValue(title), displayValue(digest))
+	var body any
+	if strings.Contains(webhookURL, "oapi.dingtalk.com") {
+		body = map[string]any{
+			"msgtype": "text",
+			"text":    map[string]string{"content": content},
+		}
+	} else {
+		body = map[string]any{
+			"event":   "inspection_report",
+			"title":   title,
+			"digest":  digest,
+			"message": content,
+		}
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
+	response, err := (&http.Client{Timeout: 8 * time.Second}).Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("webhook http %d: %s", response.StatusCode, strings.TrimSpace(string(responseBody)))
+	}
+	return nil
+}
+
 func formatAlertWebhookContent(payload AlertWebhookPayload) string {
 	var content strings.Builder
 	content.WriteString("【日志】【信息】K8s 巡检告警\n")

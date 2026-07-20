@@ -13,4 +13,5 @@ func (r *InspectionRouter) InitInspectionRouter(Router *gin.RouterGroup) {
 	(&RuleRouter{}).InitRuleRouter(Router)
 	(&TaskRouter{}).InitTaskRouter(Router)
 	(&AlertRouter{}).InitAlertRouter(Router)
+	(&ReportRouter{}).InitReportRouter(Router)
 }

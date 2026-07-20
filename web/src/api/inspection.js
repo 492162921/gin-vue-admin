@@ -48,3 +48,14 @@ export const updateAlertStatus = (id, data) =>
 export const deleteAlert = (data) => request('/inspection/alert', 'delete', data)
 export const batchDeleteAlerts = (data) =>
   request('/inspection/alert/batch-delete', 'delete', data)
+
+export const getReportList = (params) =>
+  request('/inspection/report/list', 'get', undefined, params)
+export const getReport = (params) =>
+  request('/inspection/report', 'get', undefined, params)
+export const generateReport = (data) =>
+  request('/inspection/report/generate', 'post', data)
+export const pushReport = (data) =>
+  request('/inspection/report/push', 'post', data)
+export const deleteReport = (data) =>
+  request('/inspection/report', 'delete', data)

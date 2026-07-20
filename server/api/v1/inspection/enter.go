@@ -10,6 +10,7 @@ type ApiGroup struct {
 	RuleApi
 	TaskApi
 	AlertApi
+	ReportApi
 }
 
 var (
@@ -17,4 +18,5 @@ var (
 	ruleService    = service.ServiceGroupApp.InspectionServiceGroup.RuleService
 	taskService    = service.ServiceGroupApp.InspectionServiceGroup.TaskService
 	alertService   = service.ServiceGroupApp.InspectionServiceGroup.AlertService
+	reportService  = service.ServiceGroupApp.InspectionServiceGroup.ReportService
 )

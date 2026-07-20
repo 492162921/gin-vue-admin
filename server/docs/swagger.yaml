@@ -956,6 +956,28 @@ definitions:
         description: 更新时间
         type: string
     type: object
+  inspection.InspReport:
+    properties:
+      ID:
+        description: 主键ID
+        type: integer
+      contentMd:
+        type: string
+      createdAt:
+        description: 创建时间
+        type: string
+      digest:
+        type: string
+      inspectionId:
+        type: integer
+      source:
+        type: string
+      title:
+        type: string
+      updatedAt:
+        description: 更新时间
+        type: string
+    type: object
   inspection.InspRule:
     properties:
       ID:
@@ -1045,12 +1067,10 @@ definitions:
   k8s.NodeInfo:
     properties:
       cpuusage:
-        format: float64
         type: number
       diskPressure:
         type: boolean
       memUsage:
-        format: float64
         type: number
       memoryPressure:
         type: boolean
@@ -6932,6 +6952,165 @@ paths:
       summary: 巡检模块健康检查
       tags:
       - InspHealth
+  /inspection/report:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: 报告ID
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/inspection.inspectionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除结果
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 删除巡检报告
+      tags:
+      - InspReport
+    get:
+      parameters:
+      - description: 报告ID
+        in: query
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 报告详情
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.InspReport'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 获取巡检报告详情
+      tags:
+      - InspReport
+  /inspection/report/generate:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 巡检ID
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/inspection.inspectionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 生成的报告
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.InspReport'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 为巡检结果生成报告
+      tags:
+      - InspReport
+  /inspection/report/list:
+    get:
+      parameters:
+      - in: query
+        name: inspectionId
+        type: integer
+      - description: 关键字
+        in: query
+        name: keyword
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页大小
+        in: query
+        name: pageSize
+        type: integer
+      - in: query
+        name: title
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 报告列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  allOf:
+                  - $ref: '#/definitions/response.PageResult'
+                  - properties:
+                      list:
+                        items:
+                          $ref: '#/definitions/inspection.InspReport'
+                        type: array
+                    type: object
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 分页获取巡检报告列表
+      tags:
+      - InspReport
+  /inspection/report/push:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 报告ID
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/inspection.inspectionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 推送结果
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 推送巡检报告摘要到 Webhook
+      tags:
+      - InspReport
   /inspection/rule:
     delete:
       consumes:

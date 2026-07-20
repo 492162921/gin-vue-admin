@@ -5,4 +5,5 @@ type ServiceGroup struct {
 	RuleService
 	TaskService
 	AlertService
+	ReportService
 }

@@ -49,6 +49,7 @@ func (i *initMenu) InitializeData(ctx context.Context) (context.Context, error) 
 		{MenuLevel: 1, ParentId: parent.ID, Path: "rule", Name: "inspectionRule", Component: "view/inspection/rule.vue", Sort: 2, Meta: sysModel.Meta{Title: "巡检规则", Icon: "set-up"}},
 		{MenuLevel: 1, ParentId: parent.ID, Path: "task", Name: "inspectionTask", Component: "view/inspection/task.vue", Sort: 3, Meta: sysModel.Meta{Title: "巡检任务", Icon: "calendar"}},
 		{MenuLevel: 1, ParentId: parent.ID, Path: "alert", Name: "inspectionAlert", Component: "view/inspection/alert.vue", Sort: 4, Meta: sysModel.Meta{Title: "巡检告警", Icon: "warning"}},
+		{MenuLevel: 1, ParentId: parent.ID, Path: "report", Name: "inspectionReport", Component: "view/inspection/report.vue", Sort: 5, Meta: sysModel.Meta{Title: "巡检报告", Icon: "document"}},
 	}
 	for _, menu := range children {
 		if err := db.Where("name = ?", menu.Name).FirstOrCreate(&menu).Error; err != nil {
@@ -71,5 +72,5 @@ func (i *initMenu) DataInserted(ctx context.Context) bool {
 	if !ok {
 		return false
 	}
-	return db.Where("name = ?", "inspectionAlert").First(&sysModel.SysBaseMenu{}).Error == nil
+	return db.Where("name = ?", "inspectionReport").First(&sysModel.SysBaseMenu{}).Error == nil
 }

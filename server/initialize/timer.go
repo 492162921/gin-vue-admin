@@ -30,8 +30,12 @@ func Timer() {
 		if err := json.Unmarshal(params, &input); err != nil {
 			return err
 		}
-		service := inspectionService.TaskService{}
-		_, err := service.RunNow(ctx, input.TaskID)
+		taskService := inspectionService.TaskService{}
+		inspection, err := taskService.RunNow(ctx, input.TaskID)
+		if err != nil {
+			return err
+		}
+		_, err = (&inspectionService.ReportService{}).Generate(ctx, inspection.ID)
 		return err
 	})
 }

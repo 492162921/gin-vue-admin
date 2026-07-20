@@ -81,5 +81,10 @@ func inspectionAPIs() []sysModel.SysApi {
 		{ApiGroup: "K8s巡检", Method: "PATCH", Path: "/inspection/alert/status", Description: "更新巡检告警状态"},
 		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/alert", Description: "删除巡检告警"},
 		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/alert/batch-delete", Description: "批量删除巡检告警"},
+		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/report/list", Description: "获取巡检报告列表"},
+		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/report", Description: "获取巡检报告详情"},
+		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/report/generate", Description: "生成巡检报告"},
+		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/report/push", Description: "推送巡检报告"},
+		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/report", Description: "删除巡检报告"},
 	}
 }

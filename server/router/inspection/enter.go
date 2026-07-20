@@ -10,6 +10,7 @@ type RouterGroup struct {
 	RuleRouter
 	TaskRouter
 	AlertRouter
+	ReportRouter
 }
 
 var (
@@ -18,4 +19,5 @@ var (
 	ruleApi       = api.ApiGroupApp.InspectionApiGroup.RuleApi
 	taskApi       = api.ApiGroupApp.InspectionApiGroup.TaskApi
 	alertApi      = api.ApiGroupApp.InspectionApiGroup.AlertApi
+	reportApi     = api.ApiGroupApp.InspectionApiGroup.ReportApi
 )
