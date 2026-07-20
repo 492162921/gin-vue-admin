@@ -40,3 +40,11 @@ export const getTaskList = (params) =>
 export const runTask = (data) => request('/inspection/task/run', 'post', data)
 export const getTaskInspections = (params) =>
   request('/inspection/task/inspections', 'get', undefined, params)
+
+export const getAlertList = (params) =>
+  request('/inspection/alert/list', 'get', undefined, params)
+export const updateAlertStatus = (id, data) =>
+  request('/inspection/alert/status', 'patch', data, { id })
+export const deleteAlert = (data) => request('/inspection/alert', 'delete', data)
+export const batchDeleteAlerts = (data) =>
+  request('/inspection/alert/batch-delete', 'delete', data)

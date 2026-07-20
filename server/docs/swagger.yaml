@@ -986,6 +986,15 @@ definitions:
         description: 更新时间
         type: string
     type: object
+  inspection.alertIDsRequest:
+    properties:
+      ids:
+        items:
+          type: integer
+        type: array
+    required:
+    - ids
+    type: object
   inspection.inspectionIDRequest:
     properties:
       id:
@@ -1734,6 +1743,13 @@ definitions:
       pageSize:
         description: 每页大小
         type: integer
+    type: object
+  request.PatchAlertStatus:
+    properties:
+      status:
+        type: string
+    required:
+    - status
     type: object
   request.PreviewApiCommandRequest:
     properties:
@@ -6481,6 +6497,138 @@ paths:
       summary: 初始化用户数据库
       tags:
       - InitDB
+  /inspection/alert:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: 告警ID
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/inspection.inspectionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除告警
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 删除巡检告警
+      tags:
+      - InspAlert
+  /inspection/alert/batch-delete:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: 告警ID列表
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/inspection.alertIDsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 批量删除告警
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 批量删除巡检告警
+      tags:
+      - InspAlert
+  /inspection/alert/list:
+    get:
+      parameters:
+      - description: 关键字
+        in: query
+        name: keyword
+        type: string
+      - in: query
+        name: level
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页大小
+        in: query
+        name: pageSize
+        type: integer
+      - in: query
+        name: ruleType
+        type: string
+      - in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 告警列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/response.PageResult'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 分页获取巡检告警
+      tags:
+      - InspAlert
+  /inspection/alert/status:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 告警ID
+        in: query
+        name: id
+        required: true
+        type: integer
+      - description: 告警状态
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/request.PatchAlertStatus'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新状态
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 更新巡检告警状态
+      tags:
+      - InspAlert
   /inspection/cluster:
     delete:
       consumes:

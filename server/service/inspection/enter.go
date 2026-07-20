@@ -4,4 +4,5 @@ type ServiceGroup struct {
 	ClusterService
 	RuleService
 	TaskService
+	AlertService
 }

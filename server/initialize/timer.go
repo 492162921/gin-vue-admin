@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/flipped-aurora/gin-vue-admin/server/global"
+	inspectionService "github.com/flipped-aurora/gin-vue-admin/server/service/inspection"
 	mediaService "github.com/flipped-aurora/gin-vue-admin/server/service/media"
 	"github.com/flipped-aurora/gin-vue-admin/server/task"
 )
@@ -21,5 +22,16 @@ func Timer() {
 	task.Register("CleanStaleUploads", "清理过期大文件上传会话", func(ctx context.Context, _ json.RawMessage) error {
 		svc := mediaService.MediaUploadService{}
 		return svc.CleanupStale(ctx, global.GVA_CONFIG.Media.SessionTTL)
+	})
+	task.Register("RunInspectionTask", "执行 K8s 巡检任务", func(ctx context.Context, params json.RawMessage) error {
+		var input struct {
+			TaskID uint `json:"taskId"`
+		}
+		if err := json.Unmarshal(params, &input); err != nil {
+			return err
+		}
+		service := inspectionService.TaskService{}
+		_, err := service.RunNow(ctx, input.TaskID)
+		return err
 	})
 }

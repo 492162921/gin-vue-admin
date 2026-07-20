@@ -2,12 +2,16 @@ package inspection
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/flipped-aurora/gin-vue-admin/server/global"
 	"github.com/flipped-aurora/gin-vue-admin/server/model/common/request"
 	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
 	inspRequest "github.com/flipped-aurora/gin-vue-admin/server/model/inspection/request"
+	sysModel "github.com/flipped-aurora/gin-vue-admin/server/model/system"
+	"github.com/flipped-aurora/gin-vue-admin/server/service/system"
+	"gorm.io/datatypes"
 )
 
 var defaultEngine = NewEngine(nil)
@@ -24,6 +28,9 @@ func (s *TaskService) Create(ctx context.Context, input inspRequest.CreateTask) 
 		ScheduleType: "cron", Status: "active", Rules: rules,
 	}
 	if err := global.GVA_DB.WithContext(ctx).Create(&task).Error; err != nil {
+		return nil, err
+	}
+	if err := s.syncTimedTask(ctx, &task); err != nil {
 		return nil, err
 	}
 	return s.Get(ctx, task.ID)
@@ -50,6 +57,9 @@ func (s *TaskService) Update(ctx context.Context, id uint, input inspRequest.Upd
 	if err := global.GVA_DB.WithContext(ctx).Save(task).Error; err != nil {
 		return nil, err
 	}
+	if err := s.syncTimedTask(ctx, task); err != nil {
+		return nil, err
+	}
 	return s.Get(ctx, task.ID)
 }
 
@@ -60,6 +70,11 @@ func (s *TaskService) Delete(ctx context.Context, id uint) error {
 	}
 	if err := global.GVA_DB.WithContext(ctx).Model(task).Association("Rules").Clear(); err != nil {
 		return err
+	}
+	if task.TimedTaskID != nil {
+		if err := system.TimedTaskServiceApp.DeleteTimedTask(ctx, *task.TimedTaskID); err != nil {
+			return err
+		}
 	}
 	return global.GVA_DB.WithContext(ctx).Delete(task).Error
 }
@@ -125,4 +140,39 @@ func findTaskRules(ctx context.Context, ids []uint) ([]inspModel.InspRule, error
 		return nil, fmt.Errorf("包含不存在的巡检规则")
 	}
 	return rules, nil
+}
+
+func (s *TaskService) syncTimedTask(ctx context.Context, inspectionTask *inspModel.InspTask) error {
+	if inspectionTask.CronExpr == "" {
+		if inspectionTask.TimedTaskID != nil {
+			return system.TimedTaskServiceApp.ToggleTimedTask(ctx, *inspectionTask.TimedTaskID, false)
+		}
+		return nil
+	}
+
+	params, err := json.Marshal(struct {
+		TaskID uint `json:"taskId"`
+	}{TaskID: inspectionTask.ID})
+	if err != nil {
+		return err
+	}
+	timedTask := sysModel.SysTimedTask{
+		Name:         fmt.Sprintf("insp-task-%d", inspectionTask.ID),
+		Description:  "执行 K8s 巡检任务",
+		Spec:         inspectionTask.CronExpr,
+		WithSeconds:  false,
+		ExecutorType: sysModel.TimedTaskExecutorMethod,
+		MethodName:   "RunInspectionTask",
+		Params:       datatypes.JSON(params),
+		Enabled:      inspectionTask.Status == "active",
+	}
+	if inspectionTask.TimedTaskID == nil {
+		if err := system.TimedTaskServiceApp.CreateTimedTask(ctx, &timedTask); err != nil {
+			return err
+		}
+		inspectionTask.TimedTaskID = &timedTask.ID
+		return global.GVA_DB.WithContext(ctx).Model(inspectionTask).Update("timed_task_id", timedTask.ID).Error
+	}
+	timedTask.ID = *inspectionTask.TimedTaskID
+	return system.TimedTaskServiceApp.UpdateTimedTask(ctx, &timedTask)
 }

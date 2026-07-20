@@ -20,6 +20,7 @@ func TestEngineRunWithStubMarksAnomalies(t *testing.T) {
 		&inspModel.InspTaskRule{},
 		&inspModel.InspInspection{},
 		&inspModel.InspInspectionDetail{},
+		&inspModel.InspAlert{},
 	)
 	cluster := inspModel.InspCluster{Name: "stub 集群"}
 	rules := []inspModel.InspRule{
@@ -58,6 +59,7 @@ func TestEngineRespectsNamespaceScope(t *testing.T) {
 		&inspModel.InspTaskRule{},
 		&inspModel.InspInspection{},
 		&inspModel.InspInspectionDetail{},
+		&inspModel.InspAlert{},
 	)
 	cluster := inspModel.InspCluster{Name: "测试集群"}
 	rule := inspModel.InspRule{
@@ -113,6 +115,7 @@ func TestEngineRejectsConcurrentRunOnSameTask(t *testing.T) {
 		&inspModel.InspTaskRule{},
 		&inspModel.InspInspection{},
 		&inspModel.InspInspectionDetail{},
+		&inspModel.InspAlert{},
 	)
 	cluster := inspModel.InspCluster{Name: "并发测试集群"}
 	rule := inspModel.InspRule{Name: "节点未就绪", RuleType: "node_not_ready", Enabled: true}
@@ -154,8 +157,8 @@ func TestEngineRejectsConcurrentRunOnSameTask(t *testing.T) {
 }
 
 type slowInspector struct {
-	started  chan struct{}
-	release  chan struct{}
+	started   chan struct{}
+	release   chan struct{}
 	startOnce sync.Once
 }
 

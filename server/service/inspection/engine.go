@@ -70,6 +70,21 @@ func (e *Engine) Run(ctx context.Context, taskID uint) (*inspModel.InspInspectio
 	if err := global.GVA_DB.WithContext(ctx).Save(inspection).Error; err != nil {
 		return nil, err
 	}
+	if anomalyCount > 0 {
+		alerts, samples := alertsFromDetails(inspection.ID, details)
+		if err := defaultAlertService.Create(ctx, alerts); err != nil {
+			return nil, err
+		}
+		_ = NotifyWebhook(global.GVA_CONFIG.Inspection.WebhookURL, AlertWebhookPayload{
+			TaskID:       task.ID,
+			TaskName:     task.Name,
+			ClusterName:  task.Cluster.Name,
+			InspectionID: inspection.ID,
+			AnomalyCount: anomalyCount,
+			Summary:      inspection.Summary,
+			Samples:      samples,
+		})
+	}
 	return inspection, nil
 }
 
@@ -237,5 +252,38 @@ func normalizeRuleType(ruleType string) string {
 		return "node_memory"
 	default:
 		return ruleType
+	}
+}
+
+func alertsFromDetails(inspectionID uint, details []inspModel.InspInspectionDetail) ([]inspModel.InspAlert, []string) {
+	now := time.Now()
+	alerts := make([]inspModel.InspAlert, 0)
+	samples := make([]string, 0, 5)
+	for _, detail := range details {
+		if !detail.IsAnomaly {
+			continue
+		}
+		content := fmt.Sprintf("%s: %s", detail.ResourceName, detail.Message)
+		alerts = append(alerts, inspModel.InspAlert{
+			InspectionID: inspectionID,
+			RuleType:     detail.RuleType,
+			Level:        alertLevel(detail.RuleType),
+			Status:       "open",
+			Content:      content,
+			CollectedAt:  now,
+		})
+		if len(samples) < cap(samples) {
+			samples = append(samples, content)
+		}
+	}
+	return alerts, samples
+}
+
+func alertLevel(ruleType string) string {
+	switch normalizeRuleType(ruleType) {
+	case "node_not_ready", "pod_failed", "pod_oomkilled", "pod_crash_loop", "pod_evicted":
+		return "critical"
+	default:
+		return "warning"
 	}
 }
