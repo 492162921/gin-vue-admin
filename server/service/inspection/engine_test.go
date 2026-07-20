@@ -2,7 +2,10 @@ package inspection
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/flipped-aurora/gin-vue-admin/server/internal/testutil"
 	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
@@ -99,5 +102,97 @@ func (namespaceInspector) ListPods(_ context.Context, namespace string) ([]k8s.P
 	}, nil
 }
 func (namespaceInspector) ListNamespaces(context.Context) ([]k8s.NamespaceInfo, error) {
+	return nil, nil
+}
+
+func TestEngineRejectsConcurrentRunOnSameTask(t *testing.T) {
+	db := testutil.NewMemoryDB(t,
+		&inspModel.InspCluster{},
+		&inspModel.InspRule{},
+		&inspModel.InspTask{},
+		&inspModel.InspTaskRule{},
+		&inspModel.InspInspection{},
+		&inspModel.InspInspectionDetail{},
+	)
+	cluster := inspModel.InspCluster{Name: "并发测试集群"}
+	rule := inspModel.InspRule{Name: "节点未就绪", RuleType: "node_not_ready", Enabled: true}
+	task := inspModel.InspTask{Name: "并发巡检", Cluster: &cluster, Rules: []inspModel.InspRule{rule}, Status: "active"}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("创建巡检任务失败: %v", err)
+	}
+
+	slow := newSlowInspector()
+	engine := NewEngine(func(inspModel.InspCluster) k8s.Inspector { return slow })
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if _, err := engine.Run(context.Background(), task.ID); err != nil {
+			t.Errorf("首次 Run 应成功: %v", err)
+		}
+	}()
+
+	select {
+	case <-slow.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("首次 Run 未在预期时间内进入 Inspector")
+	}
+
+	if _, err := engine.Run(context.Background(), task.ID); err == nil {
+		t.Fatal("并发 Run 应返回正在执行错误")
+	} else if !strings.Contains(err.Error(), "正在执行") {
+		t.Fatalf("并发 Run 错误信息不符，实际: %v", err)
+	}
+
+	close(slow.release)
+	wg.Wait()
+
+	if _, err := engine.Run(context.Background(), task.ID); err != nil {
+		t.Fatalf("首次 Run 结束后再次 Run 应成功: %v", err)
+	}
+}
+
+type slowInspector struct {
+	started  chan struct{}
+	release  chan struct{}
+	startOnce sync.Once
+}
+
+func newSlowInspector() *slowInspector {
+	return &slowInspector{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (s *slowInspector) signalStarted() {
+	s.startOnce.Do(func() { close(s.started) })
+}
+
+func (s *slowInspector) waitRelease(ctx context.Context) error {
+	select {
+	case <-s.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *slowInspector) TestConnection(context.Context) error { return nil }
+func (s *slowInspector) GetVersion(context.Context) (string, error) {
+	return "v1.test", nil
+}
+func (s *slowInspector) ListNodes(ctx context.Context) ([]k8s.NodeInfo, error) {
+	s.signalStarted()
+	if err := s.waitRelease(ctx); err != nil {
+		return nil, err
+	}
+	return []k8s.NodeInfo{{Name: "node-1", Status: "Ready"}}, nil
+}
+func (s *slowInspector) ListPods(context.Context, string) ([]k8s.PodInfo, error) {
+	return nil, nil
+}
+func (s *slowInspector) ListNamespaces(context.Context) ([]k8s.NamespaceInfo, error) {
 	return nil, nil
 }

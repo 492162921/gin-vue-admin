@@ -141,6 +141,21 @@ definitions:
       secret-key:
         type: string
     type: object
+  config.Inspection:
+    properties:
+      aiApiKey:
+        type: string
+      aiBaseUrl:
+        type: string
+      aiModel:
+        type: string
+      forceStub:
+        type: boolean
+      kubeConfigDir:
+        type: string
+      webhookUrl:
+        type: string
+    type: object
   config.JWT:
     properties:
       buffer-time:
@@ -540,6 +555,8 @@ definitions:
         $ref: '#/definitions/config.Excel'
       hua-wei-obs:
         $ref: '#/definitions/config.HuaWeiObs'
+      inspection:
+        $ref: '#/definitions/config.Inspection'
       jwt:
         $ref: '#/definitions/config.JWT'
       local:
@@ -838,6 +855,182 @@ definitions:
       to:
         description: 收件人:多个以英文逗号分隔 例：a@qq.com b@qq.com 正式开发中请把此项目作为参数使用
         type: string
+    type: object
+  inspection.InspCluster:
+    properties:
+      ID:
+        description: 主键ID
+        type: integer
+      createdAt:
+        description: 创建时间
+        type: string
+      k8sVersion:
+        type: string
+      name:
+        type: string
+      nodeCount:
+        type: integer
+      status:
+        type: string
+      updatedAt:
+        description: 更新时间
+        type: string
+    type: object
+  inspection.InspInspection:
+    properties:
+      ID:
+        description: 主键ID
+        type: integer
+      anomalyCount:
+        type: integer
+      createdAt:
+        description: 创建时间
+        type: string
+      details:
+        items:
+          $ref: '#/definitions/inspection.InspInspectionDetail'
+        type: array
+      finishedAt:
+        type: string
+      startedAt:
+        type: string
+      status:
+        type: string
+      summary:
+        type: string
+      task:
+        $ref: '#/definitions/inspection.InspTask'
+      taskId:
+        type: integer
+      updatedAt:
+        description: 更新时间
+        type: string
+    type: object
+  inspection.InspInspectionDetail:
+    properties:
+      ID:
+        description: 主键ID
+        type: integer
+      createdAt:
+        description: 创建时间
+        type: string
+      inspectionId:
+        type: integer
+      isAnomaly:
+        type: boolean
+      message:
+        type: string
+      metricValue:
+        type: number
+      resourceName:
+        type: string
+      resourceType:
+        type: string
+      ruleType:
+        type: string
+      updatedAt:
+        description: 更新时间
+        type: string
+    type: object
+  inspection.InspRule:
+    properties:
+      ID:
+        description: 主键ID
+        type: integer
+      createdAt:
+        description: 创建时间
+        type: string
+      enabled:
+        type: boolean
+      name:
+        type: string
+      namespace:
+        type: string
+      ruleType:
+        type: string
+      scope:
+        type: string
+      threshold:
+        type: number
+      updatedAt:
+        description: 更新时间
+        type: string
+    type: object
+  inspection.InspTask:
+    properties:
+      ID:
+        description: 主键ID
+        type: integer
+      cluster:
+        $ref: '#/definitions/inspection.InspCluster'
+      clusterId:
+        type: integer
+      createdAt:
+        description: 创建时间
+        type: string
+      cronExpr:
+        type: string
+      name:
+        type: string
+      rules:
+        items:
+          $ref: '#/definitions/inspection.InspRule'
+        type: array
+      scheduleType:
+        type: string
+      status:
+        type: string
+      timedTaskId:
+        type: integer
+      updatedAt:
+        description: 更新时间
+        type: string
+    type: object
+  inspection.inspectionIDRequest:
+    properties:
+      id:
+        type: integer
+    required:
+    - id
+    type: object
+  inspection.setEnabledRequest:
+    properties:
+      enabled:
+        type: boolean
+      id:
+        type: integer
+    required:
+    - id
+    type: object
+  k8s.NamespaceInfo:
+    properties:
+      name:
+        type: string
+      podCount:
+        type: integer
+    type: object
+  k8s.NodeInfo:
+    properties:
+      cpuusage:
+        format: float64
+        type: number
+      diskPressure:
+        type: boolean
+      memUsage:
+        format: float64
+        type: number
+      memoryPressure:
+        type: boolean
+      name:
+        type: string
+      networkUnavailable:
+        type: boolean
+      pidpressure:
+        type: boolean
+      status:
+        type: string
+      unschedulable:
+        type: boolean
     type: object
   media.AttachmentCategory:
     properties:
@@ -1224,6 +1417,32 @@ definitions:
         description: 密码
         type: string
     type: object
+  request.CreateCluster:
+    properties:
+      kubeconfig:
+        type: string
+      name:
+        type: string
+    required:
+    - kubeconfig
+    - name
+    type: object
+  request.CreateRule:
+    properties:
+      name:
+        type: string
+      namespace:
+        type: string
+      ruleType:
+        type: string
+      scope:
+        type: string
+      threshold:
+        type: number
+    required:
+    - name
+    - ruleType
+    type: object
   request.CreateSysCliRequest:
     properties:
       command:
@@ -1259,6 +1478,23 @@ definitions:
         type: string
       version:
         type: string
+    type: object
+  request.CreateTask:
+    properties:
+      clusterId:
+        type: integer
+      cronExpr:
+        type: string
+      name:
+        type: string
+      ruleIds:
+        items:
+          type: integer
+        type: array
+    required:
+    - clusterId
+    - name
+    - ruleIds
     type: object
   request.DataSource:
     properties:
@@ -1852,7 +2088,9 @@ definitions:
         description: 更新时间
         type: string
       user:
-        $ref: '#/definitions/system.SysUser'
+        allOf:
+        - $ref: '#/definitions/system.SysUser'
+        description: 所属用户(Preload 填充);form:"-" 阻止 gin 查询绑定递归进 SysUser
       userId:
         type: integer
     type: object
@@ -2012,6 +2250,49 @@ definitions:
         description: 是否启用
         type: boolean
     type: object
+  request.ToggleTimedTask:
+    properties:
+      ID:
+        type: integer
+      enabled:
+        type: boolean
+    required:
+    - ID
+    type: object
+  request.TriggerTimedTask:
+    properties:
+      ID:
+        type: integer
+    required:
+    - ID
+    type: object
+  request.UpdateCluster:
+    properties:
+      kubeconfig:
+        type: string
+      name:
+        type: string
+    required:
+    - name
+    type: object
+  request.UpdateRule:
+    properties:
+      enabled:
+        type: boolean
+      name:
+        type: string
+      namespace:
+        type: string
+      ruleType:
+        type: string
+      scope:
+        type: string
+      threshold:
+        type: number
+    required:
+    - name
+    - ruleType
+    type: object
   request.UpdateSysCliRequest:
     properties:
       command:
@@ -2051,6 +2332,25 @@ definitions:
         type: string
       version:
         type: string
+    type: object
+  request.UpdateTask:
+    properties:
+      clusterId:
+        type: integer
+      cronExpr:
+        type: string
+      name:
+        type: string
+      ruleIds:
+        items:
+          type: integer
+        type: array
+      status:
+        type: string
+    required:
+    - clusterId
+    - name
+    - ruleIds
     type: object
   request.UploadCompleteReq:
     properties:
@@ -2389,7 +2689,9 @@ definitions:
         description: 更新时间
         type: string
       user:
-        $ref: '#/definitions/system.SysUser'
+        allOf:
+        - $ref: '#/definitions/system.SysUser'
+        description: 所属用户(Preload 填充);form:"-" 阻止 gin 查询绑定递归进 SysUser
       userId:
         type: integer
     type: object
@@ -2579,12 +2881,15 @@ definitions:
       leader:
         allOf:
         - $ref: '#/definitions/system.SysUser'
-        description: 负责人用户(联系电话/邮箱从该用户带出)
+        description: 负责人用户(联系电话/邮箱从该用户带出);form:"-" 阻断 gin 绑定递归(与 SysUser.Dept 成环会栈溢出)
       leaderId:
         description: 负责人(关联 sys_users)
         type: integer
       name:
         description: 部门名称
+        type: string
+      namePath:
+        description: 公司/部门全路径名(内存组装,不建列)
         type: string
       parentId:
         description: 父部门ID(0为顶级)
@@ -2781,7 +3086,9 @@ definitions:
         description: 更新时间
         type: string
       user:
-        $ref: '#/definitions/system.SysUser'
+        allOf:
+        - $ref: '#/definitions/system.SysUser'
+        description: 登录用户(Preload 填充);form:"-" 阻止 gin 查询绑定递归进 SysUser
       userId:
         type: integer
       username:
@@ -2891,7 +3198,9 @@ definitions:
         description: 更新时间
         type: string
       user:
-        $ref: '#/definitions/system.SysUser'
+        allOf:
+        - $ref: '#/definitions/system.SysUser'
+        description: 操作人(Preload 填充);form:"-" 阻止 gin 查询绑定递归进 SysUser
       user_id:
         description: 用户id
         type: integer
@@ -3004,6 +3313,44 @@ definitions:
         description: 更新时间
         type: string
     type: object
+  system.SysTimedTask:
+    properties:
+      ID:
+        description: 主键ID
+        type: integer
+      createdAt:
+        description: 创建时间
+        type: string
+      description:
+        type: string
+      enabled:
+        type: boolean
+      executorType:
+        type: string
+      httpAllowPrivate:
+        type: boolean
+      httpBody:
+        type: string
+      httpHeader:
+        type: object
+      httpMethod:
+        type: string
+      httpUrl:
+        type: string
+      methodName:
+        type: string
+      name:
+        type: string
+      params:
+        type: object
+      spec:
+        type: string
+      updatedAt:
+        description: 更新时间
+        type: string
+      withSeconds:
+        type: boolean
+    type: object
   system.SysUser:
     properties:
       ID:
@@ -3032,7 +3379,7 @@ definitions:
       dept:
         allOf:
         - $ref: '#/definitions/system.SysDepartment'
-        description: 主部门
+        description: 主部门;form:"-" 阻断 gin 绑定递归(与 SysDepartment.Leader 成环会栈溢出)
       deptId:
         description: 主部门ID(数据归属)
         type: integer
@@ -6134,6 +6481,672 @@ paths:
       summary: 初始化用户数据库
       tags:
       - InitDB
+  /inspection/cluster:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: 集群ID
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/inspection.inspectionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除集群
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 删除巡检集群
+      tags:
+      - InspCluster
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - description: 集群ID
+        in: query
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 获取集群详情
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.InspCluster'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 获取巡检集群详情
+      tags:
+      - InspCluster
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 集群名称与 kubeconfig
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/request.CreateCluster'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 创建集群
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.InspCluster'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 创建巡检集群
+      tags:
+      - InspCluster
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 集群ID
+        in: query
+        name: id
+        required: true
+        type: integer
+      - description: 集群信息
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/request.UpdateCluster'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新集群
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.InspCluster'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 更新巡检集群
+      tags:
+      - InspCluster
+  /inspection/cluster/list:
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - description: 关键字
+        in: query
+        name: keyword
+        type: string
+      - in: query
+        name: name
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页大小
+        in: query
+        name: pageSize
+        type: integer
+      - in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 分页获取集群列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/response.PageResult'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 分页获取巡检集群列表
+      tags:
+      - InspCluster
+  /inspection/cluster/namespaces:
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - description: 集群ID
+        in: query
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 获取命名空间列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/k8s.NamespaceInfo'
+                  type: array
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 获取集群命名空间列表
+      tags:
+      - InspCluster
+  /inspection/cluster/nodes:
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - description: 集群ID
+        in: query
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 获取节点列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/k8s.NodeInfo'
+                  type: array
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 获取集群节点列表
+      tags:
+      - InspCluster
+  /inspection/cluster/refresh:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 集群ID
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/inspection.inspectionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 刷新集群状态
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.InspCluster'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 刷新巡检集群状态
+      tags:
+      - InspCluster
+  /inspection/ping:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: pong
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 巡检模块健康检查
+      tags:
+      - InspHealth
+  /inspection/rule:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: 规则ID
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/inspection.inspectionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除规则
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 删除巡检规则
+      tags:
+      - InspRule
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 规则信息
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/request.CreateRule'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 创建规则
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.InspRule'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 创建巡检规则
+      tags:
+      - InspRule
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 规则ID
+        in: query
+        name: id
+        required: true
+        type: integer
+      - description: 规则信息
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/request.UpdateRule'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新规则
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.InspRule'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 更新巡检规则
+      tags:
+      - InspRule
+  /inspection/rule/enabled:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 规则ID与启用状态
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/inspection.setEnabledRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新规则状态
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 启用或禁用巡检规则
+      tags:
+      - InspRule
+  /inspection/rule/list:
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - in: query
+        name: enabled
+        type: boolean
+      - description: 关键字
+        in: query
+        name: keyword
+        type: string
+      - in: query
+        name: name
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页大小
+        in: query
+        name: pageSize
+        type: integer
+      - in: query
+        name: ruleType
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 分页获取规则列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/response.PageResult'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 分页获取巡检规则列表
+      tags:
+      - InspRule
+  /inspection/task:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: 任务ID
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/inspection.inspectionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除任务
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 删除巡检任务
+      tags:
+      - InspTask
+    get:
+      parameters:
+      - description: 任务ID
+        in: query
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 任务详情
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.InspTask'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 获取巡检任务详情
+      tags:
+      - InspTask
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 任务信息
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/request.CreateTask'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 创建任务
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.InspTask'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 创建巡检任务
+      tags:
+      - InspTask
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 任务ID
+        in: query
+        name: id
+        required: true
+        type: integer
+      - description: 任务信息
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/request.UpdateTask'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新任务
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.InspTask'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 更新巡检任务
+      tags:
+      - InspTask
+  /inspection/task/inspections:
+    get:
+      parameters:
+      - description: 关键字
+        in: query
+        name: keyword
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页大小
+        in: query
+        name: pageSize
+        type: integer
+      - in: query
+        name: status
+        type: string
+      - in: query
+        name: taskId
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 巡检历史
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/response.PageResult'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 分页获取任务巡检历史
+      tags:
+      - InspTask
+  /inspection/task/list:
+    get:
+      parameters:
+      - in: query
+        name: clusterId
+        type: integer
+      - description: 关键字
+        in: query
+        name: keyword
+        type: string
+      - in: query
+        name: name
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页大小
+        in: query
+        name: pageSize
+        type: integer
+      - in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 任务列表
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/response.PageResult'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 分页获取巡检任务列表
+      tags:
+      - InspTask
+  /inspection/task/run:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 任务ID
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/inspection.inspectionIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 巡检结果
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/inspection.InspInspection'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 立即执行巡检任务
+      tags:
+      - InspTask
   /jwt/jsonInBlacklist:
     post:
       consumes:
@@ -8030,6 +9043,36 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: 分页获取SysDictionary列表
+      tags:
+      - SysDictionary
+  /sysDictionary/getSysDictionaryListWithDetails:
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - description: 字典名（中）
+        in: query
+        name: name
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 字典列表(每项含 SysDictionaryDetails)
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/system.SysDictionary'
+                  type: array
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 获取字典列表(含字典项明细)
       tags:
       - SysDictionary
   /sysDictionary/importSysDictionary:
@@ -10053,6 +11096,269 @@ paths:
       summary: 设置配置文件内容
       tags:
       - System
+  /timedTask/alertStream:
+    get:
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: SSE 流
+          schema:
+            type: string
+      security:
+      - ApiKeyAuth: []
+      summary: 订阅定时任务失败告警(SSE)
+      tags:
+      - SysTimedTask
+  /timedTask/createTimedTask:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 任务定义
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/system.SysTimedTask'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 创建成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 创建定时任务
+      tags:
+      - SysTimedTask
+  /timedTask/deleteTimedTask:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: 任务ID
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/request.TriggerTimedTask'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 删除定时任务
+      tags:
+      - SysTimedTask
+  /timedTask/getRegisteredMethods:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 获取成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  additionalProperties: true
+                  type: object
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 获取已注册方法列表(供下拉选择)
+      tags:
+      - SysTimedTask
+  /timedTask/getTimedTaskList:
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - in: query
+        name: enabled
+        type: boolean
+      - in: query
+        name: executorType
+        type: string
+      - description: 关键字
+        in: query
+        name: keyword
+        type: string
+      - in: query
+        name: name
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页大小
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 获取成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/response.PageResult'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 分页获取定时任务列表(含下次执行时间)
+      tags:
+      - SysTimedTask
+  /timedTask/getTimedTaskLogList:
+    get:
+      consumes:
+      - application/json
+      parameters:
+      - description: 关键字
+        in: query
+        name: keyword
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页大小
+        in: query
+        name: pageSize
+        type: integer
+      - in: query
+        name: status
+        type: string
+      - in: query
+        name: taskId
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 获取成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/response.PageResult'
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 分页获取执行日志
+      tags:
+      - SysTimedTask
+  /timedTask/toggleTimedTask:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: ID与目标状态
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/request.ToggleTimedTask'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 操作成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 启用/停用定时任务
+      tags:
+      - SysTimedTask
+  /timedTask/triggerTimedTask:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 任务ID
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/request.TriggerTimedTask'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 已触发
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 手动触发一次执行
+      tags:
+      - SysTimedTask
+  /timedTask/updateTimedTask:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 任务定义(含ID)
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/system.SysTimedTask'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新成功
+          schema:
+            allOf:
+            - $ref: '#/definitions/response.Response'
+            - properties:
+                msg:
+                  type: string
+              type: object
+      security:
+      - ApiKeyAuth: []
+      summary: 更新定时任务
+      tags:
+      - SysTimedTask
   /user/SetSelfInfo:
     put:
       consumes:
