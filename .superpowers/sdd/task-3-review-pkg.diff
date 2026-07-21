@@ -1,0 +1,1460 @@
+# Review Package
+BASE: 3b6bcdec552541930b401317acc600b82fed0ed3
+HEAD: d0cfa8d1
+
+## Commits
+d0cfa8d1 fix(inspection): add swagger comments for cluster and rule APIs
+396466e2 feat(inspection): cluster and rule CRUD with seeds and UI
+
+## Stat
+ server/api/v1/inspection/cluster.go            | 202 +++++++++++++++++++++++++
+ server/api/v1/inspection/enter.go              |   9 ++
+ server/api/v1/inspection/health_stub.go        |  28 ++--
+ server/api/v1/inspection/rule.go               | 133 ++++++++++++++++
+ server/initialize/register_init.go             |   1 +
+ server/router/inspection/cluster.go            |  25 +++
+ server/router/inspection/enter.go              |   4 +
+ server/router/inspection/inspection.go         |   2 +
+ server/router/inspection/rule.go               |  22 +++
+ server/service/inspection/cluster.go           | 168 ++++++++++++++++++++
+ server/service/inspection/enter.go             |   3 +-
+ server/service/inspection/rule.go              |  90 +++++++++++
+ server/service/inspection/rule_service_test.go |  31 ++++
+ server/source/inspection/api.go                |  74 +++++++++
+ server/source/inspection/casbin.go             |  56 +++++++
+ server/source/inspection/menu.go               |  73 +++++++++
+ server/source/inspection/rules.go              |  83 ++++++++++
+ web/src/api/inspection.js                      |  30 ++++
+ web/src/pathInfo.json                          |   4 +-
+ web/src/view/inspection/cluster.vue            | 112 ++++++++++++++
+ web/src/view/inspection/rule.vue               |  71 +++++++++
+ 21 files changed, 1207 insertions(+), 14 deletions(-)
+
+## Diff
+diff --git a/server/api/v1/inspection/cluster.go b/server/api/v1/inspection/cluster.go
+new file mode 100644
+index 00000000..5874780b
+--- /dev/null
++++ b/server/api/v1/inspection/cluster.go
+@@ -0,0 +1,202 @@
++package inspection
++
++import (
++	"github.com/flipped-aurora/gin-vue-admin/server/model/common/response"
++	inspRequest "github.com/flipped-aurora/gin-vue-admin/server/model/inspection/request"
++	"github.com/gin-gonic/gin"
++)
++
++type ClusterApi struct{}
++
++type inspectionIDRequest struct {
++	ID uint `json:"id" form:"id" binding:"required"`
++}
++
++// Create
++// @Tags      InspCluster
++// @Summary   创建巡检集群
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  body      inspRequest.CreateCluster                                    true  "集群名称与 kubeconfig"
++// @Success   200   {object}  response.Response{data=inspection.InspCluster,msg=string}      "创建集群"
++// @Router    /inspection/cluster [post]
++func (a *ClusterApi) Create(c *gin.Context) {
++	var input inspRequest.CreateCluster
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	cluster, err := clusterService.Create(c.Request.Context(), input.Name, []byte(input.Kubeconfig))
++	if err != nil {
++		response.FailWithMessage("创建集群失败", c)
++		return
++	}
++	response.OkWithData(cluster, c)
++}
++
++// Update
++// @Tags      InspCluster
++// @Summary   更新巡检集群
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     id    query     uint                                                         true  "集群ID"
++// @Param     data  body      inspRequest.UpdateCluster                                    true  "集群信息"
++// @Success   200   {object}  response.Response{data=inspection.InspCluster,msg=string}     "更新集群"
++// @Router    /inspection/cluster [put]
++func (a *ClusterApi) Update(c *gin.Context) {
++	var input inspRequest.UpdateCluster
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	var id inspectionIDRequest
++	if err := c.ShouldBindQuery(&id); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	cluster, err := clusterService.Update(c.Request.Context(), id.ID, input)
++	if err != nil {
++		response.FailWithMessage("更新集群失败", c)
++		return
++	}
++	response.OkWithData(cluster, c)
++}
++
++// Delete
++// @Tags      InspCluster
++// @Summary   删除巡检集群
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  body      inspectionIDRequest                      true  "集群ID"
++// @Success   200   {object}  response.Response{msg=string}            "删除集群"
++// @Router    /inspection/cluster [delete]
++func (a *ClusterApi) Delete(c *gin.Context) {
++	var input inspectionIDRequest
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	if err := clusterService.Delete(c.Request.Context(), input.ID); err != nil {
++		response.FailWithMessage("删除集群失败", c)
++		return
++	}
++	response.OkWithMessage("删除成功", c)
++}
++
++// Get
++// @Tags      InspCluster
++// @Summary   获取巡检集群详情
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     id    query     uint                                                         true  "集群ID"
++// @Success   200   {object}  response.Response{data=inspection.InspCluster,msg=string}     "获取集群详情"
++// @Router    /inspection/cluster [get]
++func (a *ClusterApi) Get(c *gin.Context) {
++	var input inspectionIDRequest
++	if err := c.ShouldBindQuery(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	cluster, err := clusterService.Get(c.Request.Context(), input.ID)
++	if err != nil {
++		response.FailWithMessage("获取集群失败", c)
++		return
++	}
++	response.OkWithData(cluster, c)
++}
++
++// List
++// @Tags      InspCluster
++// @Summary   分页获取巡检集群列表
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  query     inspRequest.ClusterSearch                                    true  "分页与筛选条件"
++// @Success   200   {object}  response.Response{data=response.PageResult,msg=string}       "分页获取集群列表"
++// @Router    /inspection/cluster/list [get]
++func (a *ClusterApi) List(c *gin.Context) {
++	var search inspRequest.ClusterSearch
++	if err := c.ShouldBindQuery(&search); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	list, total, err := clusterService.List(c.Request.Context(), search)
++	if err != nil {
++		response.FailWithMessage("获取集群列表失败", c)
++		return
++	}
++	response.OkWithDetailed(response.PageResult{List: list, Total: total, Page: search.Page, PageSize: search.PageSize}, "获取成功", c)
++}
++
++// Refresh
++// @Tags      InspCluster
++// @Summary   刷新巡检集群状态
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  body      inspectionIDRequest                                          true  "集群ID"
++// @Success   200   {object}  response.Response{data=inspection.InspCluster,msg=string}     "刷新集群状态"
++// @Router    /inspection/cluster/refresh [post]
++func (a *ClusterApi) Refresh(c *gin.Context) {
++	var input inspectionIDRequest
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	cluster, err := clusterService.Refresh(c.Request.Context(), input.ID)
++	if err != nil {
++		response.FailWithMessage("刷新集群失败", c)
++		return
++	}
++	response.OkWithData(cluster, c)
++}
++
++// Nodes
++// @Tags      InspCluster
++// @Summary   获取集群节点列表
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     id    query     uint                                                         true  "集群ID"
++// @Success   200   {object}  response.Response{data=[]k8s.NodeInfo,msg=string}            "获取节点列表"
++// @Router    /inspection/cluster/nodes [get]
++func (a *ClusterApi) Nodes(c *gin.Context) {
++	var input inspectionIDRequest
++	if err := c.ShouldBindQuery(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	nodes, err := clusterService.ListNodes(c.Request.Context(), input.ID)
++	if err != nil {
++		response.FailWithMessage("获取节点失败", c)
++		return
++	}
++	response.OkWithData(nodes, c)
++}
++
++// Namespaces
++// @Tags      InspCluster
++// @Summary   获取集群命名空间列表
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     id    query     uint                                                         true  "集群ID"
++// @Success   200   {object}  response.Response{data=[]k8s.NamespaceInfo,msg=string}       "获取命名空间列表"
++// @Router    /inspection/cluster/namespaces [get]
++func (a *ClusterApi) Namespaces(c *gin.Context) {
++	var input inspectionIDRequest
++	if err := c.ShouldBindQuery(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	namespaces, err := clusterService.ListNamespaces(c.Request.Context(), input.ID)
++	if err != nil {
++		response.FailWithMessage("获取命名空间失败", c)
++		return
++	}
++	response.OkWithData(namespaces, c)
++}
+diff --git a/server/api/v1/inspection/enter.go b/server/api/v1/inspection/enter.go
+index bc786c2c..76870651 100644
+--- a/server/api/v1/inspection/enter.go
++++ b/server/api/v1/inspection/enter.go
+@@ -1,7 +1,16 @@
+ package inspection
+ 
++import service "github.com/flipped-aurora/gin-vue-admin/server/service"
++
+ type HealthStubApi struct{}
+ 
+ type ApiGroup struct {
+ 	HealthStubApi
++	ClusterApi
++	RuleApi
+ }
++
++var (
++	clusterService = service.ServiceGroupApp.InspectionServiceGroup.ClusterService
++	ruleService    = service.ServiceGroupApp.InspectionServiceGroup.RuleService
++)
+diff --git a/server/api/v1/inspection/health_stub.go b/server/api/v1/inspection/health_stub.go
+index b0eeab53..1d12c1c9 100644
+--- a/server/api/v1/inspection/health_stub.go
++++ b/server/api/v1/inspection/health_stub.go
+@@ -1,11 +1,17 @@
+-package inspection
+-
+-import (
+-	"github.com/flipped-aurora/gin-vue-admin/server/model/common/response"
+-	"github.com/gin-gonic/gin"
+-)
+-
+-// Ping 临时健康占位，后续任务替换为真实 API
+-func (h *HealthStubApi) Ping(c *gin.Context) {
+-	response.OkWithMessage("pong", c)
+-}
++package inspection
+
++
+
++import (
+
++	"github.com/flipped-aurora/gin-vue-admin/server/model/common/response"
+
++	"github.com/gin-gonic/gin"
+
++)
+
++
+
++// Ping 临时健康占位，后续任务替换为真实 API
+
++// @Tags      InspHealth
+
++// @Summary   巡检模块健康检查
+
++// @Security  ApiKeyAuth
+
++// @Produce   application/json
+
++// @Success   200   {object}  response.Response{msg=string}  "pong"
+
++// @Router    /inspection/ping [get]
+
++func (h *HealthStubApi) Ping(c *gin.Context) {
+
++	response.OkWithMessage("pong", c)
+
++}
+
+diff --git a/server/api/v1/inspection/rule.go b/server/api/v1/inspection/rule.go
+new file mode 100644
+index 00000000..ce443f86
+--- /dev/null
++++ b/server/api/v1/inspection/rule.go
+@@ -0,0 +1,133 @@
++package inspection
++
++import (
++	"github.com/flipped-aurora/gin-vue-admin/server/model/common/response"
++	inspRequest "github.com/flipped-aurora/gin-vue-admin/server/model/inspection/request"
++	"github.com/gin-gonic/gin"
++)
++
++type RuleApi struct{}
++
++type setEnabledRequest struct {
++	ID      uint `json:"id" binding:"required"`
++	Enabled bool `json:"enabled"`
++}
++
++// Create
++// @Tags      InspRule
++// @Summary   创建巡检规则
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  body      inspRequest.CreateRule                                   true  "规则信息"
++// @Success   200   {object}  response.Response{data=inspection.InspRule,msg=string}   "创建规则"
++// @Router    /inspection/rule [post]
++func (a *RuleApi) Create(c *gin.Context) {
++	var input inspRequest.CreateRule
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	rule, err := ruleService.Create(c.Request.Context(), input)
++	if err != nil {
++		response.FailWithMessage("创建规则失败", c)
++		return
++	}
++	response.OkWithData(rule, c)
++}
++
++// Update
++// @Tags      InspRule
++// @Summary   更新巡检规则
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     id    query     uint                                                     true  "规则ID"
++// @Param     data  body      inspRequest.UpdateRule                                   true  "规则信息"
++// @Success   200   {object}  response.Response{data=inspection.InspRule,msg=string}    "更新规则"
++// @Router    /inspection/rule [put]
++func (a *RuleApi) Update(c *gin.Context) {
++	var input inspRequest.UpdateRule
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	var id inspectionIDRequest
++	if err := c.ShouldBindQuery(&id); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	rule, err := ruleService.Update(c.Request.Context(), id.ID, input)
++	if err != nil {
++		response.FailWithMessage("更新规则失败", c)
++		return
++	}
++	response.OkWithData(rule, c)
++}
++
++// Delete
++// @Tags      InspRule
++// @Summary   删除巡检规则
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  body      inspectionIDRequest                  true  "规则ID"
++// @Success   200   {object}  response.Response{msg=string}        "删除规则"
++// @Router    /inspection/rule [delete]
++func (a *RuleApi) Delete(c *gin.Context) {
++	var input inspectionIDRequest
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	if err := ruleService.Delete(c.Request.Context(), input.ID); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	response.OkWithMessage("删除成功", c)
++}
++
++// List
++// @Tags      InspRule
++// @Summary   分页获取巡检规则列表
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  query     inspRequest.RuleSearch                                   true  "分页与筛选条件"
++// @Success   200   {object}  response.Response{data=response.PageResult,msg=string}   "分页获取规则列表"
++// @Router    /inspection/rule/list [get]
++func (a *RuleApi) List(c *gin.Context) {
++	var search inspRequest.RuleSearch
++	if err := c.ShouldBindQuery(&search); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	list, total, err := ruleService.List(c.Request.Context(), search)
++	if err != nil {
++		response.FailWithMessage("获取规则列表失败", c)
++		return
++	}
++	response.OkWithDetailed(response.PageResult{List: list, Total: total, Page: search.Page, PageSize: search.PageSize}, "获取成功", c)
++}
++
++// SetEnabled
++// @Tags      InspRule
++// @Summary   启用或禁用巡检规则
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  body      setEnabledRequest                    true  "规则ID与启用状态"
++// @Success   200   {object}  response.Response{msg=string}        "更新规则状态"
++// @Router    /inspection/rule/enabled [post]
++func (a *RuleApi) SetEnabled(c *gin.Context) {
++	var input setEnabledRequest
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	if err := ruleService.SetEnabled(c.Request.Context(), input.ID, input.Enabled); err != nil {
++		response.FailWithMessage("更新规则状态失败", c)
++		return
++	}
++	response.OkWithMessage("更新成功", c)
++}
+diff --git a/server/initialize/register_init.go b/server/initialize/register_init.go
+index 452ff2f8..32448b7f 100644
+--- a/server/initialize/register_init.go
++++ b/server/initialize/register_init.go
+@@ -1,10 +1,11 @@
+ package initialize
+ 
+ import (
++	_ "github.com/flipped-aurora/gin-vue-admin/server/source/inspection"
+ 	_ "github.com/flipped-aurora/gin-vue-admin/server/source/media"
+ 	_ "github.com/flipped-aurora/gin-vue-admin/server/source/system"
+ )
+ 
+ func init() {
+ 	// do nothing,only import source package so that inits can be registered
+ }
+diff --git a/server/router/inspection/cluster.go b/server/router/inspection/cluster.go
+new file mode 100644
+index 00000000..c930f5e4
+--- /dev/null
++++ b/server/router/inspection/cluster.go
+@@ -0,0 +1,25 @@
++package inspection
++
++import (
++	"github.com/flipped-aurora/gin-vue-admin/server/middleware"
++	"github.com/gin-gonic/gin"
++)
++
++type ClusterRouter struct{}
++
++func (r *ClusterRouter) InitClusterRouter(router *gin.RouterGroup) {
++	record := router.Group("inspection/cluster").Use(middleware.OperationRecord())
++	read := router.Group("inspection/cluster")
++	{
++		record.POST("", clusterApi.Create)
++		record.PUT("", clusterApi.Update)
++		record.DELETE("", clusterApi.Delete)
++		record.POST("refresh", clusterApi.Refresh)
++	}
++	{
++		read.GET("", clusterApi.Get)
++		read.GET("list", clusterApi.List)
++		read.GET("nodes", clusterApi.Nodes)
++		read.GET("namespaces", clusterApi.Namespaces)
++	}
++}
+diff --git a/server/router/inspection/enter.go b/server/router/inspection/enter.go
+index 9e5cdb4a..ff54bb7f 100644
+--- a/server/router/inspection/enter.go
++++ b/server/router/inspection/enter.go
+@@ -1,13 +1,17 @@
+ package inspection
+ 
+ import (
+ 	api "github.com/flipped-aurora/gin-vue-admin/server/api/v1"
+ )
+ 
+ type RouterGroup struct {
+ 	InspectionRouter
++	ClusterRouter
++	RuleRouter
+ }
+ 
+ var (
+ 	healthStubApi = api.ApiGroupApp.InspectionApiGroup.HealthStubApi
++	clusterApi    = api.ApiGroupApp.InspectionApiGroup.ClusterApi
++	ruleApi       = api.ApiGroupApp.InspectionApiGroup.RuleApi
+ )
+diff --git a/server/router/inspection/inspection.go b/server/router/inspection/inspection.go
+index 80a37a81..27f1ce32 100644
+--- a/server/router/inspection/inspection.go
++++ b/server/router/inspection/inspection.go
+@@ -2,11 +2,13 @@ package inspection
+ 
+ import "github.com/gin-gonic/gin"
+ 
+ type InspectionRouter struct{}
+ 
+ func (r *InspectionRouter) InitInspectionRouter(Router *gin.RouterGroup) {
+ 	g := Router.Group("inspection")
+ 	{
+ 		g.GET("ping", healthStubApi.Ping)
+ 	}
++	(&ClusterRouter{}).InitClusterRouter(Router)
++	(&RuleRouter{}).InitRuleRouter(Router)
+ }
+diff --git a/server/router/inspection/rule.go b/server/router/inspection/rule.go
+new file mode 100644
+index 00000000..5c831b87
+--- /dev/null
++++ b/server/router/inspection/rule.go
+@@ -0,0 +1,22 @@
++package inspection
++
++import (
++	"github.com/flipped-aurora/gin-vue-admin/server/middleware"
++	"github.com/gin-gonic/gin"
++)
++
++type RuleRouter struct{}
++
++func (r *RuleRouter) InitRuleRouter(router *gin.RouterGroup) {
++	record := router.Group("inspection/rule").Use(middleware.OperationRecord())
++	read := router.Group("inspection/rule")
++	{
++		record.POST("", ruleApi.Create)
++		record.PUT("", ruleApi.Update)
++		record.DELETE("", ruleApi.Delete)
++		record.POST("enabled", ruleApi.SetEnabled)
++	}
++	{
++		read.GET("list", ruleApi.List)
++	}
++}
+diff --git a/server/service/inspection/cluster.go b/server/service/inspection/cluster.go
+new file mode 100644
+index 00000000..d2ea617b
+--- /dev/null
++++ b/server/service/inspection/cluster.go
+@@ -0,0 +1,168 @@
++package inspection
++
++import (
++	"context"
++	"crypto/rand"
++	"encoding/hex"
++	"fmt"
++	"os"
++	"path/filepath"
++
++	"github.com/flipped-aurora/gin-vue-admin/server/global"
++	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
++	inspRequest "github.com/flipped-aurora/gin-vue-admin/server/model/inspection/request"
++	"github.com/flipped-aurora/gin-vue-admin/server/service/inspection/k8s"
++)
++
++type ClusterService struct{}
++
++func (s *ClusterService) Create(ctx context.Context, name string, kubeconfigBytes []byte) (*inspModel.InspCluster, error) {
++	path, err := saveKubeconfig(kubeconfigBytes)
++	if err != nil {
++		return nil, err
++	}
++	cluster := inspModel.InspCluster{Name: name, KubeconfigPath: path, Status: "unknown"}
++	s.probe(ctx, &cluster)
++	if err := global.GVA_DB.WithContext(ctx).Create(&cluster).Error; err != nil {
++		_ = os.Remove(path)
++		return nil, err
++	}
++	return &cluster, nil
++}
++
++func (s *ClusterService) Refresh(ctx context.Context, id uint) (*inspModel.InspCluster, error) {
++	cluster, err := s.Get(ctx, id)
++	if err != nil {
++		return nil, err
++	}
++	s.probe(ctx, cluster)
++	if err := global.GVA_DB.WithContext(ctx).Save(cluster).Error; err != nil {
++		return nil, err
++	}
++	return cluster, nil
++}
++
++func (s *ClusterService) List(ctx context.Context, search inspRequest.ClusterSearch) ([]inspModel.InspCluster, int64, error) {
++	db := global.GVA_DB.WithContext(ctx).Model(&inspModel.InspCluster{})
++	if search.Name != "" {
++		db = db.Where("name LIKE ?", "%"+search.Name+"%")
++	}
++	if search.Status != "" {
++		db = db.Where("status = ?", search.Status)
++	}
++	var total int64
++	if err := db.Count(&total).Error; err != nil {
++		return nil, 0, err
++	}
++	limit, offset := search.LimitOffset()
++	var clusters []inspModel.InspCluster
++	if err := db.Order("id DESC").Limit(limit).Offset(offset).Find(&clusters).Error; err != nil {
++		return nil, 0, err
++	}
++	return clusters, total, nil
++}
++
++func (s *ClusterService) Get(ctx context.Context, id uint) (*inspModel.InspCluster, error) {
++	var cluster inspModel.InspCluster
++	if err := global.GVA_DB.WithContext(ctx).First(&cluster, id).Error; err != nil {
++		return nil, err
++	}
++	return &cluster, nil
++}
++
++func (s *ClusterService) Update(ctx context.Context, id uint, input inspRequest.UpdateCluster) (*inspModel.InspCluster, error) {
++	cluster, err := s.Get(ctx, id)
++	if err != nil {
++		return nil, err
++	}
++	cluster.Name = input.Name
++	if input.Kubeconfig != "" {
++		path, err := saveKubeconfig([]byte(input.Kubeconfig))
++		if err != nil {
++			return nil, err
++		}
++		oldPath := cluster.KubeconfigPath
++		cluster.KubeconfigPath = path
++		s.probe(ctx, cluster)
++		if err := global.GVA_DB.WithContext(ctx).Save(cluster).Error; err != nil {
++			_ = os.Remove(path)
++			return nil, err
++		}
++		if oldPath != "" && oldPath != path {
++			_ = os.Remove(oldPath)
++		}
++		return cluster, nil
++	}
++	if err := global.GVA_DB.WithContext(ctx).Save(cluster).Error; err != nil {
++		return nil, err
++	}
++	return cluster, nil
++}
++
++func (s *ClusterService) Delete(ctx context.Context, id uint) error {
++	cluster, err := s.Get(ctx, id)
++	if err != nil {
++		return err
++	}
++	if err := global.GVA_DB.WithContext(ctx).Delete(cluster).Error; err != nil {
++		return err
++	}
++	if cluster.KubeconfigPath != "" {
++		_ = os.Remove(cluster.KubeconfigPath)
++	}
++	return nil
++}
++
++func (s *ClusterService) ListNodes(ctx context.Context, id uint) ([]k8s.NodeInfo, error) {
++	cluster, err := s.Get(ctx, id)
++	if err != nil {
++		return nil, err
++	}
++	return k8s.NewInspector(cluster.KubeconfigPath, global.GVA_CONFIG.Inspection.ForceStub).ListNodes(ctx)
++}
++
++func (s *ClusterService) ListNamespaces(ctx context.Context, id uint) ([]k8s.NamespaceInfo, error) {
++	cluster, err := s.Get(ctx, id)
++	if err != nil {
++		return nil, err
++	}
++	return k8s.NewInspector(cluster.KubeconfigPath, global.GVA_CONFIG.Inspection.ForceStub).ListNamespaces(ctx)
++}
++
++func (s *ClusterService) probe(ctx context.Context, cluster *inspModel.InspCluster) {
++	inspector := k8s.NewInspector(cluster.KubeconfigPath, global.GVA_CONFIG.Inspection.ForceStub)
++	if err := inspector.TestConnection(ctx); err != nil {
++		cluster.Status = "unreachable"
++		cluster.K8sVersion = ""
++		cluster.NodeCount = 0
++		return
++	}
++	cluster.Status = "available"
++	cluster.K8sVersion, _ = inspector.GetVersion(ctx)
++	nodes, err := inspector.ListNodes(ctx)
++	if err == nil {
++		cluster.NodeCount = len(nodes)
++	}
++}
++
++func saveKubeconfig(contents []byte) (string, error) {
++	if len(contents) == 0 {
++		return "", fmt.Errorf("kubeconfig 不能为空")
++	}
++	dir := global.GVA_CONFIG.Inspection.KubeConfigDir
++	if dir == "" {
++		dir = "uploads/kubeconfigs"
++	}
++	if err := os.MkdirAll(dir, 0700); err != nil {
++		return "", err
++	}
++	token := make([]byte, 16)
++	if _, err := rand.Read(token); err != nil {
++		return "", err
++	}
++	path := filepath.Join(dir, hex.EncodeToString(token)+".yaml")
++	if err := os.WriteFile(path, contents, 0600); err != nil {
++		return "", err
++	}
++	return path, nil
++}
+diff --git a/server/service/inspection/enter.go b/server/service/inspection/enter.go
+index 18930047..79227e79 100644
+--- a/server/service/inspection/enter.go
++++ b/server/service/inspection/enter.go
+@@ -1,7 +1,6 @@
+ package inspection
+ 
+-type ClusterService struct{}
+-
+ type ServiceGroup struct {
+ 	ClusterService
++	RuleService
+ }
+diff --git a/server/service/inspection/rule.go b/server/service/inspection/rule.go
+new file mode 100644
+index 00000000..f144ebd0
+--- /dev/null
++++ b/server/service/inspection/rule.go
+@@ -0,0 +1,90 @@
++package inspection
++
++import (
++	"context"
++	"fmt"
++
++	"github.com/flipped-aurora/gin-vue-admin/server/global"
++	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
++	inspRequest "github.com/flipped-aurora/gin-vue-admin/server/model/inspection/request"
++)
++
++type RuleService struct{}
++
++func (s *RuleService) Create(ctx context.Context, input inspRequest.CreateRule) (*inspModel.InspRule, error) {
++	rule := inspModel.InspRule{
++		Name:      input.Name,
++		RuleType:  input.RuleType,
++		Threshold: input.Threshold,
++		Scope:     input.Scope,
++		Namespace: input.Namespace,
++		Enabled:   true,
++	}
++	if rule.Scope == "" {
++		rule.Scope = "cluster"
++	}
++	if err := global.GVA_DB.WithContext(ctx).Create(&rule).Error; err != nil {
++		return nil, err
++	}
++	return &rule, nil
++}
++
++func (s *RuleService) Update(ctx context.Context, id uint, input inspRequest.UpdateRule) (*inspModel.InspRule, error) {
++	var rule inspModel.InspRule
++	if err := global.GVA_DB.WithContext(ctx).First(&rule, id).Error; err != nil {
++		return nil, err
++	}
++	rule.Name = input.Name
++	rule.RuleType = input.RuleType
++	rule.Threshold = input.Threshold
++	rule.Scope = input.Scope
++	rule.Namespace = input.Namespace
++	if rule.Scope == "" {
++		rule.Scope = "cluster"
++	}
++	if input.Enabled != nil {
++		rule.Enabled = *input.Enabled
++	}
++	if err := global.GVA_DB.WithContext(ctx).Save(&rule).Error; err != nil {
++		return nil, err
++	}
++	return &rule, nil
++}
++
++func (s *RuleService) Delete(ctx context.Context, id uint) error {
++	var count int64
++	if err := global.GVA_DB.WithContext(ctx).Model(&inspModel.InspTaskRule{}).Where("insp_rule_id = ?", id).Count(&count).Error; err != nil {
++		return err
++	}
++	if count > 0 {
++		return fmt.Errorf("规则已绑定巡检任务，不能删除")
++	}
++	return global.GVA_DB.WithContext(ctx).Delete(&inspModel.InspRule{}, id).Error
++}
++
++func (s *RuleService) SetEnabled(ctx context.Context, id uint, enabled bool) error {
++	return global.GVA_DB.WithContext(ctx).Model(&inspModel.InspRule{}).Where("id = ?", id).Update("enabled", enabled).Error
++}
++
++func (s *RuleService) List(ctx context.Context, search inspRequest.RuleSearch) ([]inspModel.InspRule, int64, error) {
++	db := global.GVA_DB.WithContext(ctx).Model(&inspModel.InspRule{})
++	if search.Name != "" {
++		db = db.Where("name LIKE ?", "%"+search.Name+"%")
++	}
++	if search.RuleType != "" {
++		db = db.Where("rule_type = ?", search.RuleType)
++	}
++	if search.Enabled != nil {
++		db = db.Where("enabled = ?", *search.Enabled)
++	}
++	var total int64
++	if err := db.Count(&total).Error; err != nil {
++		return nil, 0, err
++	}
++	limit, offset := search.LimitOffset()
++	var rules []inspModel.InspRule
++	if err := db.Order("id DESC").Limit(limit).Offset(offset).Find(&rules).Error; err != nil {
++		return nil, 0, err
++	}
++	return rules, total, nil
++}
+diff --git a/server/service/inspection/rule_service_test.go b/server/service/inspection/rule_service_test.go
+new file mode 100644
+index 00000000..694b5590
+--- /dev/null
++++ b/server/service/inspection/rule_service_test.go
+@@ -0,0 +1,31 @@
++package inspection
++
++import (
++	"context"
++	"strings"
++	"testing"
++
++	"github.com/flipped-aurora/gin-vue-admin/server/internal/testutil"
++	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
++)
++
++func TestDeleteRuleBlockedWhenBoundToTask(t *testing.T) {
++	db := testutil.NewMemoryDB(t, &inspModel.InspRule{}, &inspModel.InspTask{}, &inspModel.InspCluster{})
++
++	rule := inspModel.InspRule{Name: "节点 CPU", RuleType: "node_cpu", Enabled: true}
++	if err := db.Create(&rule).Error; err != nil {
++		t.Fatalf("创建规则失败: %v", err)
++	}
++	task := inspModel.InspTask{Name: "每日巡检", ClusterID: 1, Rules: []inspModel.InspRule{rule}}
++	if err := db.Create(&task).Error; err != nil {
++		t.Fatalf("创建任务失败: %v", err)
++	}
++
++	err := new(RuleService).Delete(context.Background(), rule.ID)
++	if err == nil {
++		t.Fatal("已绑定任务的规则删除应失败")
++	}
++	if !strings.Contains(err.Error(), "任务") {
++		t.Fatalf("错误信息应说明规则仍被任务引用，实际为: %v", err)
++	}
++}
+diff --git a/server/source/inspection/api.go b/server/source/inspection/api.go
+new file mode 100644
+index 00000000..45e800b9
+--- /dev/null
++++ b/server/source/inspection/api.go
+@@ -0,0 +1,74 @@
++package inspection
++
++import (
++	"context"
++
++	sysModel "github.com/flipped-aurora/gin-vue-admin/server/model/system"
++	"github.com/flipped-aurora/gin-vue-admin/server/service/system"
++	"github.com/pkg/errors"
++	"gorm.io/gorm"
++)
++
++const initOrderAPI = system.InitOrderExternal + 3
++
++type initAPI struct{}
++
++func init() {
++	system.RegisterInit(initOrderAPI, &initAPI{})
++}
++
++func (i *initAPI) InitializerName() string { return "inspection_apis" }
++
++func (i *initAPI) MigrateTable(ctx context.Context) (context.Context, error) {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	if !ok {
++		return ctx, system.ErrMissingDBContext
++	}
++	return ctx, db.AutoMigrate(&sysModel.SysApi{})
++}
++
++func (i *initAPI) TableCreated(ctx context.Context) bool {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	return ok && db.Migrator().HasTable(&sysModel.SysApi{})
++}
++
++func (i *initAPI) InitializeData(ctx context.Context) (context.Context, error) {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	if !ok {
++		return ctx, system.ErrMissingDBContext
++	}
++	apis := inspectionAPIs()
++	for _, api := range apis {
++		if err := db.Where("path = ? AND method = ?", api.Path, api.Method).FirstOrCreate(&api).Error; err != nil {
++			return ctx, errors.Wrap(err, "初始化巡检 API 失败")
++		}
++	}
++	return ctx, nil
++}
++
++func (i *initAPI) DataInserted(ctx context.Context) bool {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	if !ok {
++		return false
++	}
++	var count int64
++	return db.Model(&sysModel.SysApi{}).Where("api_group = ?", "K8s巡检").Count(&count).Error == nil && count == int64(len(inspectionAPIs()))
++}
++
++func inspectionAPIs() []sysModel.SysApi {
++	return []sysModel.SysApi{
++		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/cluster", Description: "创建巡检集群"},
++		{ApiGroup: "K8s巡检", Method: "PUT", Path: "/inspection/cluster", Description: "更新巡检集群"},
++		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/cluster", Description: "删除巡检集群"},
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/cluster", Description: "获取巡检集群"},
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/cluster/list", Description: "获取巡检集群列表"},
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/cluster/nodes", Description: "获取集群节点"},
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/cluster/namespaces", Description: "获取集群命名空间"},
++		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/cluster/refresh", Description: "刷新集群状态"},
++		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/rule", Description: "创建巡检规则"},
++		{ApiGroup: "K8s巡检", Method: "PUT", Path: "/inspection/rule", Description: "更新巡检规则"},
++		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/rule", Description: "删除巡检规则"},
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/rule/list", Description: "获取巡检规则列表"},
++		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/rule/enabled", Description: "启停巡检规则"},
++	}
++}
+diff --git a/server/source/inspection/casbin.go b/server/source/inspection/casbin.go
+new file mode 100644
+index 00000000..6c358534
+--- /dev/null
++++ b/server/source/inspection/casbin.go
+@@ -0,0 +1,56 @@
++package inspection
++
++import (
++	"context"
++
++	adapter "github.com/casbin/gorm-adapter/v3"
++	"github.com/flipped-aurora/gin-vue-admin/server/service/system"
++	"github.com/pkg/errors"
++	"gorm.io/gorm"
++)
++
++const initOrderCasbin = system.InitOrderExternal + 4
++
++type initCasbin struct{}
++
++func init() {
++	system.RegisterInit(initOrderCasbin, &initCasbin{})
++}
++
++func (i *initCasbin) InitializerName() string { return "inspection_casbin" }
++
++func (i *initCasbin) MigrateTable(ctx context.Context) (context.Context, error) {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	if !ok {
++		return ctx, system.ErrMissingDBContext
++	}
++	return ctx, db.AutoMigrate(&adapter.CasbinRule{})
++}
++
++func (i *initCasbin) TableCreated(ctx context.Context) bool {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	return ok && db.Migrator().HasTable(&adapter.CasbinRule{})
++}
++
++func (i *initCasbin) InitializeData(ctx context.Context) (context.Context, error) {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	if !ok {
++		return ctx, system.ErrMissingDBContext
++	}
++	for _, api := range inspectionAPIs() {
++		rule := adapter.CasbinRule{Ptype: "p", V0: "888", V1: api.Path, V2: api.Method}
++		if err := db.Where(adapter.CasbinRule{Ptype: rule.Ptype, V0: rule.V0, V1: rule.V1, V2: rule.V2}).FirstOrCreate(&rule).Error; err != nil {
++			return ctx, errors.Wrap(err, "初始化巡检 Casbin 权限失败")
++		}
++	}
++	return ctx, nil
++}
++
++func (i *initCasbin) DataInserted(ctx context.Context) bool {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	if !ok {
++		return false
++	}
++	var count int64
++	return db.Model(&adapter.CasbinRule{}).Where("ptype = ? AND v0 = ? AND v1 LIKE ?", "p", "888", "/inspection/%").Count(&count).Error == nil && count == int64(len(inspectionAPIs()))
++}
+diff --git a/server/source/inspection/menu.go b/server/source/inspection/menu.go
+new file mode 100644
+index 00000000..1b10f4a3
+--- /dev/null
++++ b/server/source/inspection/menu.go
+@@ -0,0 +1,73 @@
++package inspection
++
++import (
++	"context"
++
++	sysModel "github.com/flipped-aurora/gin-vue-admin/server/model/system"
++	"github.com/flipped-aurora/gin-vue-admin/server/service/system"
++	"github.com/pkg/errors"
++	"gorm.io/gorm"
++)
++
++const initOrderMenu = system.InitOrderExternal + 2
++
++type initMenu struct{}
++
++func init() {
++	system.RegisterInit(initOrderMenu, &initMenu{})
++}
++
++func (i *initMenu) InitializerName() string { return "inspection_menus" }
++
++func (i *initMenu) MigrateTable(ctx context.Context) (context.Context, error) {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	if !ok {
++		return ctx, system.ErrMissingDBContext
++	}
++	return ctx, db.AutoMigrate(&sysModel.SysBaseMenu{}, &sysModel.SysAuthority{})
++}
++
++func (i *initMenu) TableCreated(ctx context.Context) bool {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	return ok && db.Migrator().HasTable(&sysModel.SysBaseMenu{})
++}
++
++func (i *initMenu) InitializeData(ctx context.Context) (context.Context, error) {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	if !ok {
++		return ctx, system.ErrMissingDBContext
++	}
++	parent := sysModel.SysBaseMenu{
++		MenuLevel: 0, Path: "inspection", Name: "inspection", Component: "view/routerHolder.vue", Sort: 9,
++		Meta: sysModel.Meta{Title: "K8s 巡检", Icon: "monitor-gva"},
++	}
++	if err := db.Where("name = ?", parent.Name).FirstOrCreate(&parent).Error; err != nil {
++		return ctx, errors.Wrap(err, "初始化巡检父菜单失败")
++	}
++	children := []sysModel.SysBaseMenu{
++		{MenuLevel: 1, ParentId: parent.ID, Path: "cluster", Name: "inspectionCluster", Component: "view/inspection/cluster.vue", Sort: 1, Meta: sysModel.Meta{Title: "集群管理", Icon: "connection"}},
++		{MenuLevel: 1, ParentId: parent.ID, Path: "rule", Name: "inspectionRule", Component: "view/inspection/rule.vue", Sort: 2, Meta: sysModel.Meta{Title: "巡检规则", Icon: "set-up"}},
++	}
++	for _, menu := range children {
++		if err := db.Where("name = ?", menu.Name).FirstOrCreate(&menu).Error; err != nil {
++			return ctx, errors.Wrap(err, "初始化巡检子菜单失败")
++		}
++	}
++	var admin sysModel.SysAuthority
++	if err := db.Where("authority_id = ?", 888).First(&admin).Error; err != nil {
++		return ctx, errors.Wrap(err, "查询超级管理员失败")
++	}
++	menus := append([]sysModel.SysBaseMenu{parent}, children...)
++	if err := db.Model(&admin).Association("SysBaseMenus").Append(menus); err != nil {
++		return ctx, errors.Wrap(err, "授予巡检菜单权限失败")
++	}
++	return ctx, nil
++}
++
++func (i *initMenu) DataInserted(ctx context.Context) bool {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	if !ok {
++		return false
++	}
++	return db.Where("name = ?", "inspectionRule").First(&sysModel.SysBaseMenu{}).Error == nil
++}
+diff --git a/server/source/inspection/rules.go b/server/source/inspection/rules.go
+new file mode 100644
+index 00000000..823f916a
+--- /dev/null
++++ b/server/source/inspection/rules.go
+@@ -0,0 +1,83 @@
++package inspection
++
++import (
++	"context"
++
++	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
++	"github.com/flipped-aurora/gin-vue-admin/server/service/system"
++	"github.com/pkg/errors"
++	"gorm.io/gorm"
++)
++
++const initOrderRules = system.InitOrderExternal + 1
++
++type initRules struct{}
++
++func init() {
++	system.RegisterInit(initOrderRules, &initRules{})
++}
++
++func (i *initRules) InitializerName() string { return "inspection_rules" }
++
++func (i *initRules) MigrateTable(ctx context.Context) (context.Context, error) {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	if !ok {
++		return ctx, system.ErrMissingDBContext
++	}
++	return ctx, db.AutoMigrate(&inspModel.InspRule{})
++}
++
++func (i *initRules) TableCreated(ctx context.Context) bool {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	return ok && db.Migrator().HasTable(&inspModel.InspRule{})
++}
++
++func (i *initRules) InitializeData(ctx context.Context) (context.Context, error) {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	if !ok {
++		return ctx, system.ErrMissingDBContext
++	}
++	rules := []inspModel.InspRule{
++		{Name: "节点 CPU 使用率", RuleType: "node_cpu", Threshold: 80, Scope: "cluster", Enabled: true},
++		{Name: "节点内存使用率", RuleType: "node_memory", Threshold: 80, Scope: "cluster", Enabled: true},
++		{Name: "Pod 重启次数", RuleType: "pod_restart", Threshold: 1, Scope: "cluster", Enabled: true},
++		{Name: "Pod 高重启次数", RuleType: "pod_restart_high", Threshold: 5, Scope: "cluster", Enabled: true},
++		{Name: "Pod 未运行", RuleType: "pod_not_running", Scope: "cluster", Enabled: true},
++		{Name: "节点未就绪", RuleType: "node_not_ready", Scope: "cluster", Enabled: true},
++		{Name: "节点磁盘压力", RuleType: "node_disk_pressure", Scope: "cluster", Enabled: true},
++		{Name: "节点内存压力", RuleType: "node_memory_pressure", Scope: "cluster", Enabled: true},
++		{Name: "节点 PID 压力", RuleType: "node_pid_pressure", Scope: "cluster", Enabled: true},
++		{Name: "节点网络不可用", RuleType: "node_network_unavailable", Scope: "cluster", Enabled: true},
++		{Name: "节点不可调度", RuleType: "node_unschedulable", Scope: "cluster", Enabled: true},
++		{Name: "Pod Pending", RuleType: "pod_pending", Scope: "cluster", Enabled: true},
++		{Name: "Pod Failed", RuleType: "pod_failed", Scope: "cluster", Enabled: true},
++		{Name: "Pod Unknown", RuleType: "pod_unknown", Scope: "cluster", Enabled: true},
++		{Name: "Pod OOMKilled", RuleType: "pod_oomkilled", Scope: "cluster", Enabled: true},
++		{Name: "镜像拉取失败", RuleType: "pod_image_pull_backoff", Scope: "cluster", Enabled: true},
++		{Name: "Pod CrashLoop", RuleType: "pod_crash_loop", Scope: "cluster", Enabled: true},
++		{Name: "Pod 未就绪", RuleType: "pod_not_ready", Scope: "cluster", Enabled: true},
++		{Name: "Pod 已驱逐", RuleType: "pod_evicted", Scope: "cluster", Enabled: true},
++		{Name: "容器未就绪", RuleType: "container_not_ready", Scope: "cluster", Enabled: true},
++	}
++	for _, rule := range rules {
++		if err := db.Where("rule_type = ?", rule.RuleType).FirstOrCreate(&rule).Error; err != nil {
++			return ctx, errors.Wrap(err, "初始化巡检规则失败")
++		}
++	}
++	return ctx, nil
++}
++
++func (i *initRules) DataInserted(ctx context.Context) bool {
++	db, ok := ctx.Value("db").(*gorm.DB)
++	if !ok {
++		return false
++	}
++	var count int64
++	return db.Model(&inspModel.InspRule{}).Where("rule_type IN ?", []string{
++		"node_cpu", "node_memory", "pod_restart", "pod_restart_high", "pod_not_running",
++		"node_not_ready", "node_disk_pressure", "node_memory_pressure", "node_pid_pressure",
++		"node_network_unavailable", "node_unschedulable", "pod_pending", "pod_failed",
++		"pod_unknown", "pod_oomkilled", "pod_image_pull_backoff", "pod_crash_loop",
++		"pod_not_ready", "pod_evicted", "container_not_ready",
++	}).Count(&count).Error == nil && count == 20
++}
+diff --git a/web/src/api/inspection.js b/web/src/api/inspection.js
+new file mode 100644
+index 00000000..2dfc2c06
+--- /dev/null
++++ b/web/src/api/inspection.js
+@@ -0,0 +1,30 @@
++import service from '@/utils/request'
++
++const request = (url, method, data, params) =>
++  service({ url, method, data, params })
++
++export const createCluster = (data) =>
++  request('/inspection/cluster', 'post', data)
++export const updateCluster = (id, data) =>
++  request('/inspection/cluster', 'put', data, { id })
++export const deleteCluster = (data) =>
++  request('/inspection/cluster', 'delete', data)
++export const getCluster = (params) =>
++  request('/inspection/cluster', 'get', undefined, params)
++export const getClusterList = (params) =>
++  request('/inspection/cluster/list', 'get', undefined, params)
++export const refreshCluster = (data) =>
++  request('/inspection/cluster/refresh', 'post', data)
++export const getClusterNodes = (params) =>
++  request('/inspection/cluster/nodes', 'get', undefined, params)
++export const getClusterNamespaces = (params) =>
++  request('/inspection/cluster/namespaces', 'get', undefined, params)
++
++export const createRule = (data) => request('/inspection/rule', 'post', data)
++export const updateRule = (id, data) =>
++  request('/inspection/rule', 'put', data, { id })
++export const deleteRule = (data) => request('/inspection/rule', 'delete', data)
++export const getRuleList = (params) =>
++  request('/inspection/rule/list', 'get', undefined, params)
++export const setRuleEnabled = (data) =>
++  request('/inspection/rule/enabled', 'post', data)
+diff --git a/web/src/pathInfo.json b/web/src/pathInfo.json
+index 555ec29e..f12ccab6 100644
+--- a/web/src/pathInfo.json
++++ b/web/src/pathInfo.json
+@@ -9,25 +9,27 @@
+   "/src/view/dashboard/components/pluginTable.vue": "PluginTable",
+   "/src/view/dashboard/components/quickLinks.vue": "QuickLinks",
+   "/src/view/dashboard/components/table.vue": "Table",
+   "/src/view/dashboard/components/wiki.vue": "Wiki",
+   "/src/view/dashboard/index.vue": "Dashboard",
+   "/src/view/error/index.vue": "Error",
+   "/src/view/error/reload.vue": "Reload",
+   "/src/view/example/customer/customer.vue": "Customer",
+   "/src/view/example/index.vue": "Example",
+   "/src/view/init/index.vue": "Init",
++  "/src/view/inspection/cluster.vue": "InspectionCluster",
++  "/src/view/inspection/rule.vue": "InspectionRule",
+   "/src/view/layout/aside/CollapseBar.vue": "AsideCollapseBar",
+-  "/src/view/layout/aside/MobileMenuDrawer.vue": "MobileMenuDrawer",
+   "/src/view/layout/aside/combinationMode.vue": "AsideCombinationMode",
+   "/src/view/layout/aside/headMode.vue": "AsideHeadMode",
+   "/src/view/layout/aside/index.vue": "GvaAside",
++  "/src/view/layout/aside/MobileMenuDrawer.vue": "MobileMenuDrawer",
+   "/src/view/layout/aside/normalMode.vue": "AsideNormalMode",
+   "/src/view/layout/aside/sidebarMode.vue": "SidebarMode",
+   "/src/view/layout/aside/verticalMode.vue": "VerticalMode",
+   "/src/view/layout/header/index.vue": "Index",
+   "/src/view/layout/header/tools.vue": "Tools",
+   "/src/view/layout/iframe.vue": "GvaLayoutIframe",
+   "/src/view/layout/index.vue": "GvaLayout",
+   "/src/view/layout/screenfull/index.vue": "Screenfull",
+   "/src/view/layout/search/search.vue": "BtnBox",
+   "/src/view/layout/setting/components/cardModeSelector.vue": "CardModeSelector",
+diff --git a/web/src/view/inspection/cluster.vue b/web/src/view/inspection/cluster.vue
+new file mode 100644
+index 00000000..56958d25
+--- /dev/null
++++ b/web/src/view/inspection/cluster.vue
+@@ -0,0 +1,112 @@
++<template>
++  <div class="gva-table-box">
++    <div class="gva-btn-list">
++      <el-button type="primary" icon="plus" @click="openForm()">接入集群</el-button>
++      <el-input v-model="search.name" class="w-56" clearable placeholder="按集群名称筛选" @change="loadClusters" />
++      <el-button icon="search" @click="loadClusters">查询</el-button>
++    </div>
++    <el-table :data="clusters" row-key="ID">
++      <el-table-column label="集群名称" prop="name" min-width="180" />
++      <el-table-column label="状态" width="110">
++        <template #default="{ row }"><el-tag :type="row.status === 'available' ? 'success' : 'danger'">{{ row.status }}</el-tag></template>
++      </el-table-column>
++      <el-table-column label="Kubernetes 版本" prop="k8sVersion" min-width="160" />
++      <el-table-column label="节点数" prop="nodeCount" width="100" />
++      <el-table-column label="操作" width="260">
++        <template #default="{ row }">
++          <el-button link type="primary" @click="refresh(row)">刷新</el-button>
++          <el-button link type="primary" @click="showResources(row)">资源</el-button>
++          <el-button link type="primary" @click="openForm(row)">编辑</el-button>
++          <el-button link type="danger" @click="remove(row)">删除</el-button>
++        </template>
++      </el-table-column>
++    </el-table>
++    <div class="gva-pagination">
++      <el-pagination :current-page="page" :page-size="pageSize" :total="total" layout="total, prev, pager, next" @current-change="changePage" />
++    </div>
++
++    <el-dialog v-model="formVisible" :title="form.ID ? '编辑集群' : '接入集群'" width="580px">
++      <el-form :model="form" label-width="105px">
++        <el-form-item label="集群名称" required><el-input v-model="form.name" /></el-form-item>
++        <el-form-item label="kubeconfig" required>
++          <el-upload :auto-upload="false" :show-file-list="false" accept=".yaml,.yml,.conf" @change="readKubeconfig">
++            <el-button>选择 kubeconfig 文件</el-button>
++          </el-upload>
++          <el-input v-model="form.kubeconfig" class="mt-3" type="textarea" :rows="6" placeholder="也可直接粘贴 kubeconfig 内容；内容不会在列表或接口回包中展示" />
++        </el-form-item>
++      </el-form>
++      <template #footer><el-button @click="formVisible = false">取消</el-button><el-button type="primary" @click="save">保存</el-button></template>
++    </el-dialog>
++
++    <el-drawer v-model="resourceVisible" :title="`${selected?.name || ''} 的资源`" size="560px">
++      <el-tabs>
++        <el-tab-pane label="节点">
++          <el-table :data="nodes"><el-table-column prop="name" label="名称" /><el-table-column prop="status" label="状态" /><el-table-column prop="CPUUsage" label="CPU %" /><el-table-column prop="MemUsage" label="内存 %" /></el-table>
++        </el-tab-pane>
++        <el-tab-pane label="命名空间">
++          <el-table :data="namespaces"><el-table-column prop="name" label="名称" /><el-table-column prop="podCount" label="Pod 数量" /></el-table>
++        </el-tab-pane>
++      </el-tabs>
++    </el-drawer>
++  </div>
++</template>
++
++<script setup>
++  import { ref } from 'vue'
++  import { ElMessage, ElMessageBox } from 'element-plus'
++  import { createCluster, deleteCluster, getClusterList, getClusterNamespaces, getClusterNodes, refreshCluster, updateCluster } from '@/api/inspection'
++
++  defineOptions({ name: 'InspectionCluster' })
++
++  const clusters = ref([])
++  const total = ref(0)
++  const page = ref(1)
++  const pageSize = 10
++  const search = ref({ name: '' })
++  const formVisible = ref(false)
++  const form = ref({ name: '', kubeconfig: '' })
++  const resourceVisible = ref(false)
++  const selected = ref(null)
++  const nodes = ref([])
++  const namespaces = ref([])
++
++  const loadClusters = async () => {
++    const res = await getClusterList({ page: page.value, pageSize, ...search.value })
++    if (res.code === 0) {
++      clusters.value = res.data.list
++      total.value = res.data.total
++    }
++  }
++  const changePage = (value) => { page.value = value; loadClusters() }
++  const openForm = (row) => {
++    form.value = row ? { ID: row.ID, name: row.name, kubeconfig: '' } : { name: '', kubeconfig: '' }
++    formVisible.value = true
++  }
++  const readKubeconfig = (file) => {
++    const reader = new FileReader()
++    reader.onload = () => { form.value.kubeconfig = reader.result }
++    reader.readAsText(file.raw)
++  }
++  const save = async () => {
++    if (!form.value.name || (!form.value.ID && !form.value.kubeconfig)) return ElMessage.warning('请填写名称并提供 kubeconfig')
++    const res = form.value.ID ? await updateCluster(form.value.ID, form.value) : await createCluster(form.value)
++    if (res.code === 0) { ElMessage.success('已保存'); formVisible.value = false; loadClusters() }
++  }
++  const refresh = async (row) => {
++    const res = await refreshCluster({ id: row.ID })
++    if (res.code === 0) { ElMessage.success('已刷新'); loadClusters() }
++  }
++  const showResources = async (row) => {
++    selected.value = row
++    const [nodeRes, namespaceRes] = await Promise.all([getClusterNodes({ id: row.ID }), getClusterNamespaces({ id: row.ID })])
++    if (nodeRes.code === 0) nodes.value = nodeRes.data
++    if (namespaceRes.code === 0) namespaces.value = namespaceRes.data
++    resourceVisible.value = true
++  }
++  const remove = (row) => ElMessageBox.confirm(`删除集群“${row.name}”及其本地 kubeconfig？`, '确认删除', { type: 'warning' }).then(async () => {
++    const res = await deleteCluster({ id: row.ID })
++    if (res.code === 0) { ElMessage.success('已删除'); loadClusters() }
++  })
++
++  loadClusters()
++</script>
+diff --git a/web/src/view/inspection/rule.vue b/web/src/view/inspection/rule.vue
+new file mode 100644
+index 00000000..7e37b90f
+--- /dev/null
++++ b/web/src/view/inspection/rule.vue
+@@ -0,0 +1,71 @@
++<template>
++  <div class="gva-table-box">
++    <div class="gva-btn-list">
++      <el-button type="primary" icon="plus" @click="openForm()">新增规则</el-button>
++      <el-input v-model="search.name" class="w-56" clearable placeholder="规则名称" @change="loadRules" />
++      <el-button icon="search" @click="loadRules">查询</el-button>
++    </div>
++    <el-table :data="rules" row-key="ID">
++      <el-table-column prop="name" label="规则名称" min-width="160" />
++      <el-table-column prop="ruleType" label="规则类型" min-width="190" />
++      <el-table-column prop="threshold" label="阈值" width="100" />
++      <el-table-column label="范围" min-width="160"><template #default="{ row }">{{ row.scope === 'namespace' ? `命名空间：${row.namespace}` : '整个集群' }}</template></el-table-column>
++      <el-table-column label="启用" width="100"><template #default="{ row }"><el-switch :model-value="row.enabled" @change="toggle(row, $event)" /></template></el-table-column>
++      <el-table-column label="操作" width="140"><template #default="{ row }"><el-button link type="primary" @click="openForm(row)">编辑</el-button><el-button link type="danger" @click="remove(row)">删除</el-button></template></el-table-column>
++    </el-table>
++    <div class="gva-pagination"><el-pagination :current-page="page" :page-size="pageSize" :total="total" layout="total, prev, pager, next" @current-change="changePage" /></div>
++
++    <el-dialog v-model="formVisible" :title="form.ID ? '编辑规则' : '新增规则'" width="500px">
++      <el-form :model="form" label-width="100px">
++        <el-form-item label="规则名称" required><el-input v-model="form.name" /></el-form-item>
++        <el-form-item label="规则类型" required><el-select v-model="form.ruleType" class="w-full" filterable><el-option v-for="type in ruleTypes" :key="type" :label="type" :value="type" /></el-select></el-form-item>
++        <el-form-item label="阈值"><el-input-number v-model="form.threshold" :min="0" /></el-form-item>
++        <el-form-item label="作用域"><el-radio-group v-model="form.scope"><el-radio value="cluster">整个集群</el-radio><el-radio value="namespace">命名空间</el-radio></el-radio-group></el-form-item>
++        <el-form-item v-if="form.scope === 'namespace'" label="命名空间" required><el-input v-model="form.namespace" /></el-form-item>
++      </el-form>
++      <template #footer><el-button @click="formVisible = false">取消</el-button><el-button type="primary" @click="save">保存</el-button></template>
++    </el-dialog>
++  </div>
++</template>
++
++<script setup>
++  import { ref } from 'vue'
++  import { ElMessage, ElMessageBox } from 'element-plus'
++  import { createRule, deleteRule, getRuleList, setRuleEnabled, updateRule } from '@/api/inspection'
++
++  defineOptions({ name: 'InspectionRule' })
++
++  const ruleTypes = ['node_cpu', 'node_memory', 'pod_restart', 'pod_restart_high', 'pod_not_running', 'node_not_ready', 'node_disk_pressure', 'node_memory_pressure', 'node_pid_pressure', 'node_network_unavailable', 'node_unschedulable', 'pod_pending', 'pod_failed', 'pod_unknown', 'pod_oomkilled', 'pod_image_pull_backoff', 'pod_crash_loop', 'pod_not_ready', 'pod_evicted', 'container_not_ready']
++  const rules = ref([])
++  const total = ref(0)
++  const page = ref(1)
++  const pageSize = 10
++  const search = ref({ name: '' })
++  const formVisible = ref(false)
++  const form = ref({})
++
++  const loadRules = async () => {
++    const res = await getRuleList({ page: page.value, pageSize, ...search.value })
++    if (res.code === 0) { rules.value = res.data.list; total.value = res.data.total }
++  }
++  const changePage = (value) => { page.value = value; loadRules() }
++  const openForm = (row) => {
++    form.value = row ? { ...row } : { name: '', ruleType: 'node_cpu', threshold: 0, scope: 'cluster', namespace: '' }
++    formVisible.value = true
++  }
++  const save = async () => {
++    if (!form.value.name || !form.value.ruleType || (form.value.scope === 'namespace' && !form.value.namespace)) return ElMessage.warning('请填写规则必填项')
++    const res = form.value.ID ? await updateRule(form.value.ID, form.value) : await createRule(form.value)
++    if (res.code === 0) { ElMessage.success('已保存'); formVisible.value = false; loadRules() }
++  }
++  const toggle = async (row, enabled) => {
++    const res = await setRuleEnabled({ id: row.ID, enabled })
++    if (res.code === 0) { ElMessage.success('状态已更新'); loadRules() }
++  }
++  const remove = (row) => ElMessageBox.confirm(`删除规则“${row.name}”？绑定到任务的规则不能删除。`, '确认删除', { type: 'warning' }).then(async () => {
++    const res = await deleteRule({ id: row.ID })
++    if (res.code === 0) { ElMessage.success('已删除'); loadRules() }
++  })
++
++  loadRules()
++</script>

@@ -1,0 +1,1975 @@
+# Review Package
+BASE: 124a418d39848cb96b0639b8d6098e75c08e664b
+HEAD: c1b21985
+
+## Commits
+c1b21985 feat(inspection): sync timed tasks, alerts, and webhook notify
+
+## Stat
+ .superpowers/sdd/task-5-report.md               |   8 +
+ server/api/v1/inspection/alert.go               | 107 ++++++++++
+ server/api/v1/inspection/enter.go               |   2 +
+ server/docs/docs.go                             | 256 ++++++++++++++++++++++++
+ server/docs/swagger.json                        | 256 ++++++++++++++++++++++++
+ server/docs/swagger.yaml                        | 148 ++++++++++++++
+ server/initialize/timer.go                      |  12 ++
+ server/router/inspection/alert.go               |  21 ++
+ server/router/inspection/enter.go               |   2 +
+ server/router/inspection/inspection.go          |   1 +
+ server/service/inspection/alert.go              |  66 ++++++
+ server/service/inspection/alert_service_test.go |  48 +++++
+ server/service/inspection/engine.go             |  48 +++++
+ server/service/inspection/engine_test.go        |   7 +-
+ server/service/inspection/enter.go              |   1 +
+ server/service/inspection/task.go               |  50 +++++
+ server/service/inspection/webhook.go            | 101 ++++++++++
+ server/service/inspection/webhook_test.go       |  67 +++++++
+ server/source/inspection/api.go                 |   4 +
+ server/source/inspection/menu.go                |   3 +-
+ web/src/api/inspection.js                       |   8 +
+ web/src/view/inspection/alert.vue               |  95 +++++++++
+ 22 files changed, 1308 insertions(+), 3 deletions(-)
+
+## Diff
+diff --git a/.superpowers/sdd/task-5-report.md b/.superpowers/sdd/task-5-report.md
+new file mode 100644
+index 00000000..b878837f
+--- /dev/null
++++ b/.superpowers/sdd/task-5-report.md
+@@ -0,0 +1,8 @@
++# Task 5 Report
++
++- Registered `RunInspectionTask` and synchronized cron tasks with `sys_timed_tasks`.
++- Added anomaly alerts, webhook notification (including DingTalk payload/error validation), alert APIs, menu/Casbin/API seeds, and alert UI.
++- Added TDD coverage for webhook payloads/DingTalk errors and alert filtering/status updates.
++- Regenerated Swagger documents.
++- Verified: `go test ./service/inspection/ -count=1` and `npm run lint -- --quiet`.
++- `go test ./... -count=1` remains blocked by unrelated existing MCP localhost, AI plugin rendering, auto router, and system template test failures.
+diff --git a/server/api/v1/inspection/alert.go b/server/api/v1/inspection/alert.go
+new file mode 100644
+index 00000000..ab5271ab
+--- /dev/null
++++ b/server/api/v1/inspection/alert.go
+@@ -0,0 +1,107 @@
++package inspection
++
++import (
++	"github.com/flipped-aurora/gin-vue-admin/server/model/common/response"
++	inspRequest "github.com/flipped-aurora/gin-vue-admin/server/model/inspection/request"
++	"github.com/gin-gonic/gin"
++)
++
++type alertIDsRequest struct {
++	IDs []uint `json:"ids" binding:"required"`
++}
++
++type AlertApi struct{}
++
++// List
++// @Tags      InspAlert
++// @Summary   分页获取巡检告警
++// @Security  ApiKeyAuth
++// @Produce   application/json
++// @Param     data  query     inspRequest.AlertSearch                                true  "分页与筛选条件"
++// @Success   200   {object}  response.Response{data=response.PageResult,msg=string}  "告警列表"
++// @Router    /inspection/alert/list [get]
++func (a *AlertApi) List(c *gin.Context) {
++	var search inspRequest.AlertSearch
++	if err := c.ShouldBindQuery(&search); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	list, total, err := alertService.List(c.Request.Context(), search)
++	if err != nil {
++		response.FailWithMessage("获取巡检告警失败", c)
++		return
++	}
++	response.OkWithDetailed(response.PageResult{List: list, Total: total, Page: search.Page, PageSize: search.PageSize}, "获取成功", c)
++}
++
++// UpdateStatus
++// @Tags      InspAlert
++// @Summary   更新巡检告警状态
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     id    query     uint                                                   true  "告警ID"
++// @Param     data  body      inspRequest.PatchAlertStatus                           true  "告警状态"
++// @Success   200   {object}  response.Response{msg=string}                         "更新状态"
++// @Router    /inspection/alert/status [patch]
++func (a *AlertApi) UpdateStatus(c *gin.Context) {
++	var input inspRequest.PatchAlertStatus
++	var id inspectionIDRequest
++	if err := c.ShouldBindQuery(&id); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	if err := alertService.UpdateStatus(c.Request.Context(), id.ID, input.Status); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	response.OkWithMessage("更新成功", c)
++}
++
++// Delete
++// @Tags      InspAlert
++// @Summary   删除巡检告警
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  body      inspectionIDRequest             true  "告警ID"
++// @Success   200   {object}  response.Response{msg=string}   "删除告警"
++// @Router    /inspection/alert [delete]
++func (a *AlertApi) Delete(c *gin.Context) {
++	var input inspectionIDRequest
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	if err := alertService.Delete(c.Request.Context(), input.ID); err != nil {
++		response.FailWithMessage("删除巡检告警失败", c)
++		return
++	}
++	response.OkWithMessage("删除成功", c)
++}
++
++// BatchDelete
++// @Tags      InspAlert
++// @Summary   批量删除巡检告警
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  body      alertIDsRequest                  true  "告警ID列表"
++// @Success   200   {object}  response.Response{msg=string}   "批量删除告警"
++// @Router    /inspection/alert/batch-delete [delete]
++func (a *AlertApi) BatchDelete(c *gin.Context) {
++	var input alertIDsRequest
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	if err := alertService.DeleteByIDs(c.Request.Context(), input.IDs); err != nil {
++		response.FailWithMessage("批量删除巡检告警失败", c)
++		return
++	}
++	response.OkWithMessage("删除成功", c)
++}
+diff --git a/server/api/v1/inspection/enter.go b/server/api/v1/inspection/enter.go
+index 1710037b..d94d628f 100644
+--- a/server/api/v1/inspection/enter.go
++++ b/server/api/v1/inspection/enter.go
+@@ -2,17 +2,19 @@ package inspection
+ 
+ import service "github.com/flipped-aurora/gin-vue-admin/server/service"
+ 
+ type HealthStubApi struct{}
+ 
+ type ApiGroup struct {
+ 	HealthStubApi
+ 	ClusterApi
+ 	RuleApi
+ 	TaskApi
++	AlertApi
+ }
+ 
+ var (
+ 	clusterService = service.ServiceGroupApp.InspectionServiceGroup.ClusterService
+ 	ruleService    = service.ServiceGroupApp.InspectionServiceGroup.RuleService
+ 	taskService    = service.ServiceGroupApp.InspectionServiceGroup.TaskService
++	alertService   = service.ServiceGroupApp.InspectionServiceGroup.AlertService
+ )
+diff --git a/server/docs/docs.go b/server/docs/docs.go
+index f5e81d89..221c73b3 100644
+--- a/server/docs/docs.go
++++ b/server/docs/docs.go
+@@ -5333,20 +5333,251 @@ const docTemplate = `{
+                                             "type": "string"
+                                         }
+                                     }
+                                 }
+                             ]
+                         }
+                     }
+                 }
+             }
+         },
++        "/inspection/alert": {
++            "delete": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "consumes": [
++                    "application/json"
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspAlert"
++                ],
++                "summary": "删除巡检告警",
++                "parameters": [
++                    {
++                        "description": "告警ID",
++                        "name": "data",
++                        "in": "body",
++                        "required": true,
++                        "schema": {
++                            "$ref": "#/definitions/inspection.inspectionIDRequest"
++                        }
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "删除告警",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/alert/batch-delete": {
++            "delete": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "consumes": [
++                    "application/json"
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspAlert"
++                ],
++                "summary": "批量删除巡检告警",
++                "parameters": [
++                    {
++                        "description": "告警ID列表",
++                        "name": "data",
++                        "in": "body",
++                        "required": true,
++                        "schema": {
++                            "$ref": "#/definitions/inspection.alertIDsRequest"
++                        }
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "批量删除告警",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/alert/list": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspAlert"
++                ],
++                "summary": "分页获取巡检告警",
++                "parameters": [
++                    {
++                        "type": "string",
++                        "description": "关键字",
++                        "name": "keyword",
++                        "in": "query"
++                    },
++                    {
++                        "type": "string",
++                        "name": "level",
++                        "in": "query"
++                    },
++                    {
++                        "type": "integer",
++                        "description": "页码",
++                        "name": "page",
++                        "in": "query"
++                    },
++                    {
++                        "type": "integer",
++                        "description": "每页大小",
++                        "name": "pageSize",
++                        "in": "query"
++                    },
++                    {
++                        "type": "string",
++                        "name": "ruleType",
++                        "in": "query"
++                    },
++                    {
++                        "type": "string",
++                        "name": "status",
++                        "in": "query"
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "告警列表",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "$ref": "#/definitions/response.PageResult"
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/alert/status": {
++            "patch": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "consumes": [
++                    "application/json"
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspAlert"
++                ],
++                "summary": "更新巡检告警状态",
++                "parameters": [
++                    {
++                        "type": "integer",
++                        "description": "告警ID",
++                        "name": "id",
++                        "in": "query",
++                        "required": true
++                    },
++                    {
++                        "description": "告警状态",
++                        "name": "data",
++                        "in": "body",
++                        "required": true,
++                        "schema": {
++                            "$ref": "#/definitions/request.PatchAlertStatus"
++                        }
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "更新状态",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
+         "/inspection/cluster": {
+             "get": {
+                 "security": [
+                     {
+                         "ApiKeyAuth": []
+                     }
+                 ],
+                 "consumes": [
+                     "application/json"
+                 ],
+@@ -15871,20 +16102,34 @@ const docTemplate = `{
+                 },
+                 "timedTaskId": {
+                     "type": "integer"
+                 },
+                 "updatedAt": {
+                     "description": "更新时间",
+                     "type": "string"
+                 }
+             }
+         },
++        "inspection.alertIDsRequest": {
++            "type": "object",
++            "required": [
++                "ids"
++            ],
++            "properties": {
++                "ids": {
++                    "type": "array",
++                    "items": {
++                        "type": "integer"
++                    }
++                }
++            }
++        },
+         "inspection.inspectionIDRequest": {
+             "type": "object",
+             "required": [
+                 "id"
+             ],
+             "properties": {
+                 "id": {
+                     "type": "integer"
+                 }
+             }
+@@ -16945,20 +17190,31 @@ const docTemplate = `{
+                 "page": {
+                     "description": "页码",
+                     "type": "integer"
+                 },
+                 "pageSize": {
+                     "description": "每页大小",
+                     "type": "integer"
+                 }
+             }
+         },
++        "request.PatchAlertStatus": {
++            "type": "object",
++            "required": [
++                "status"
++            ],
++            "properties": {
++                "status": {
++                    "type": "string"
++                }
++            }
++        },
+         "request.PreviewApiCommandRequest": {
+             "type": "object",
+             "properties": {
+                 "apiId": {
+                     "type": "integer"
+                 },
+                 "cliId": {
+                     "type": "integer"
+                 }
+             }
+diff --git a/server/docs/swagger.json b/server/docs/swagger.json
+index 968a4412..f82ebc16 100644
+--- a/server/docs/swagger.json
++++ b/server/docs/swagger.json
+@@ -5325,20 +5325,251 @@
+                                             "type": "string"
+                                         }
+                                     }
+                                 }
+                             ]
+                         }
+                     }
+                 }
+             }
+         },
++        "/inspection/alert": {
++            "delete": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "consumes": [
++                    "application/json"
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspAlert"
++                ],
++                "summary": "删除巡检告警",
++                "parameters": [
++                    {
++                        "description": "告警ID",
++                        "name": "data",
++                        "in": "body",
++                        "required": true,
++                        "schema": {
++                            "$ref": "#/definitions/inspection.inspectionIDRequest"
++                        }
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "删除告警",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/alert/batch-delete": {
++            "delete": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "consumes": [
++                    "application/json"
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspAlert"
++                ],
++                "summary": "批量删除巡检告警",
++                "parameters": [
++                    {
++                        "description": "告警ID列表",
++                        "name": "data",
++                        "in": "body",
++                        "required": true,
++                        "schema": {
++                            "$ref": "#/definitions/inspection.alertIDsRequest"
++                        }
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "批量删除告警",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/alert/list": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspAlert"
++                ],
++                "summary": "分页获取巡检告警",
++                "parameters": [
++                    {
++                        "type": "string",
++                        "description": "关键字",
++                        "name": "keyword",
++                        "in": "query"
++                    },
++                    {
++                        "type": "string",
++                        "name": "level",
++                        "in": "query"
++                    },
++                    {
++                        "type": "integer",
++                        "description": "页码",
++                        "name": "page",
++                        "in": "query"
++                    },
++                    {
++                        "type": "integer",
++                        "description": "每页大小",
++                        "name": "pageSize",
++                        "in": "query"
++                    },
++                    {
++                        "type": "string",
++                        "name": "ruleType",
++                        "in": "query"
++                    },
++                    {
++                        "type": "string",
++                        "name": "status",
++                        "in": "query"
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "告警列表",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "$ref": "#/definitions/response.PageResult"
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/alert/status": {
++            "patch": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "consumes": [
++                    "application/json"
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspAlert"
++                ],
++                "summary": "更新巡检告警状态",
++                "parameters": [
++                    {
++                        "type": "integer",
++                        "description": "告警ID",
++                        "name": "id",
++                        "in": "query",
++                        "required": true
++                    },
++                    {
++                        "description": "告警状态",
++                        "name": "data",
++                        "in": "body",
++                        "required": true,
++                        "schema": {
++                            "$ref": "#/definitions/request.PatchAlertStatus"
++                        }
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "更新状态",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
+         "/inspection/cluster": {
+             "get": {
+                 "security": [
+                     {
+                         "ApiKeyAuth": []
+                     }
+                 ],
+                 "consumes": [
+                     "application/json"
+                 ],
+@@ -15863,20 +16094,34 @@
+                 },
+                 "timedTaskId": {
+                     "type": "integer"
+                 },
+                 "updatedAt": {
+                     "description": "更新时间",
+                     "type": "string"
+                 }
+             }
+         },
++        "inspection.alertIDsRequest": {
++            "type": "object",
++            "required": [
++                "ids"
++            ],
++            "properties": {
++                "ids": {
++                    "type": "array",
++                    "items": {
++                        "type": "integer"
++                    }
++                }
++            }
++        },
+         "inspection.inspectionIDRequest": {
+             "type": "object",
+             "required": [
+                 "id"
+             ],
+             "properties": {
+                 "id": {
+                     "type": "integer"
+                 }
+             }
+@@ -16937,20 +17182,31 @@
+                 "page": {
+                     "description": "页码",
+                     "type": "integer"
+                 },
+                 "pageSize": {
+                     "description": "每页大小",
+                     "type": "integer"
+                 }
+             }
+         },
++        "request.PatchAlertStatus": {
++            "type": "object",
++            "required": [
++                "status"
++            ],
++            "properties": {
++                "status": {
++                    "type": "string"
++                }
++            }
++        },
+         "request.PreviewApiCommandRequest": {
+             "type": "object",
+             "properties": {
+                 "apiId": {
+                     "type": "integer"
+                 },
+                 "cliId": {
+                     "type": "integer"
+                 }
+             }
+diff --git a/server/docs/swagger.yaml b/server/docs/swagger.yaml
+index c48fa334..9b9e16ba 100644
+--- a/server/docs/swagger.yaml
++++ b/server/docs/swagger.yaml
+@@ -979,20 +979,29 @@ definitions:
+       scheduleType:
+         type: string
+       status:
+         type: string
+       timedTaskId:
+         type: integer
+       updatedAt:
+         description: 更新时间
+         type: string
+     type: object
++  inspection.alertIDsRequest:
++    properties:
++      ids:
++        items:
++          type: integer
++        type: array
++    required:
++    - ids
++    type: object
+   inspection.inspectionIDRequest:
+     properties:
+       id:
+         type: integer
+     required:
+     - id
+     type: object
+   inspection.setEnabledRequest:
+     properties:
+       enabled:
+@@ -1728,20 +1737,27 @@ definitions:
+       keyword:
+         description: 关键字
+         type: string
+       page:
+         description: 页码
+         type: integer
+       pageSize:
+         description: 每页大小
+         type: integer
+     type: object
++  request.PatchAlertStatus:
++    properties:
++      status:
++        type: string
++    required:
++    - status
++    type: object
+   request.PreviewApiCommandRequest:
+     properties:
+       apiId:
+         type: integer
+       cliId:
+         type: integer
+     type: object
+   request.PreviewSysCliManifestRequest:
+     properties:
+       cliId:
+@@ -6474,20 +6490,152 @@ paths:
+           schema:
+             allOf:
+             - $ref: '#/definitions/response.Response'
+             - properties:
+                 data:
+                   type: string
+               type: object
+       summary: 初始化用户数据库
+       tags:
+       - InitDB
++  /inspection/alert:
++    delete:
++      consumes:
++      - application/json
++      parameters:
++      - description: 告警ID
++        in: body
++        name: data
++        required: true
++        schema:
++          $ref: '#/definitions/inspection.inspectionIDRequest'
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 删除告警
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 删除巡检告警
++      tags:
++      - InspAlert
++  /inspection/alert/batch-delete:
++    delete:
++      consumes:
++      - application/json
++      parameters:
++      - description: 告警ID列表
++        in: body
++        name: data
++        required: true
++        schema:
++          $ref: '#/definitions/inspection.alertIDsRequest'
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 批量删除告警
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 批量删除巡检告警
++      tags:
++      - InspAlert
++  /inspection/alert/list:
++    get:
++      parameters:
++      - description: 关键字
++        in: query
++        name: keyword
++        type: string
++      - in: query
++        name: level
++        type: string
++      - description: 页码
++        in: query
++        name: page
++        type: integer
++      - description: 每页大小
++        in: query
++        name: pageSize
++        type: integer
++      - in: query
++        name: ruleType
++        type: string
++      - in: query
++        name: status
++        type: string
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 告警列表
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                data:
++                  $ref: '#/definitions/response.PageResult'
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 分页获取巡检告警
++      tags:
++      - InspAlert
++  /inspection/alert/status:
++    patch:
++      consumes:
++      - application/json
++      parameters:
++      - description: 告警ID
++        in: query
++        name: id
++        required: true
++        type: integer
++      - description: 告警状态
++        in: body
++        name: data
++        required: true
++        schema:
++          $ref: '#/definitions/request.PatchAlertStatus'
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 更新状态
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 更新巡检告警状态
++      tags:
++      - InspAlert
+   /inspection/cluster:
+     delete:
+       consumes:
+       - application/json
+       parameters:
+       - description: 集群ID
+         in: body
+         name: data
+         required: true
+         schema:
+diff --git a/server/initialize/timer.go b/server/initialize/timer.go
+index 27a8347e..9c9ab496 100644
+--- a/server/initialize/timer.go
++++ b/server/initialize/timer.go
+@@ -1,25 +1,37 @@
+ // server/initialize/timer.go
+ package initialize
+ 
+ import (
+ 	"context"
+ 	"encoding/json"
+ 
+ 	"github.com/flipped-aurora/gin-vue-admin/server/global"
++	inspectionService "github.com/flipped-aurora/gin-vue-admin/server/service/inspection"
+ 	mediaService "github.com/flipped-aurora/gin-vue-admin/server/service/media"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/task"
+ )
+ 
+ // Timer 注册可供定时任务面板选用的命名方法。
+ // 不再硬编码调度: 调度由 sys_timed_tasks 表驱动(种子见 source/system/timed_task.go),
+ // 启动加载见 LoadTimedTasks。ctx 由统一 Runner 注入(已带 datascope.WithSystem 与超时)。
+ // 二开注册自己的任务: 在此追加 task.Register, 然后在面板新建任务选择该方法即可。
+ func Timer() {
+ 	task.Register("ClearDB", "清理数据库过期日志(操作记录/JWT黑名单/定时任务执行日志)", func(ctx context.Context, _ json.RawMessage) error {
+ 		return task.ClearTable(global.GVA_DB.WithContext(ctx))
+ 	})
+ 	task.Register("CleanStaleUploads", "清理过期大文件上传会话", func(ctx context.Context, _ json.RawMessage) error {
+ 		svc := mediaService.MediaUploadService{}
+ 		return svc.CleanupStale(ctx, global.GVA_CONFIG.Media.SessionTTL)
+ 	})
++	task.Register("RunInspectionTask", "执行 K8s 巡检任务", func(ctx context.Context, params json.RawMessage) error {
++		var input struct {
++			TaskID uint `json:"taskId"`
++		}
++		if err := json.Unmarshal(params, &input); err != nil {
++			return err
++		}
++		service := inspectionService.TaskService{}
++		_, err := service.RunNow(ctx, input.TaskID)
++		return err
++	})
+ }
+diff --git a/server/router/inspection/alert.go b/server/router/inspection/alert.go
+new file mode 100644
+index 00000000..7b1f0ebb
+--- /dev/null
++++ b/server/router/inspection/alert.go
+@@ -0,0 +1,21 @@
++package inspection
++
++import (
++	"github.com/flipped-aurora/gin-vue-admin/server/middleware"
++	"github.com/gin-gonic/gin"
++)
++
++type AlertRouter struct{}
++
++func (r *AlertRouter) InitAlertRouter(router *gin.RouterGroup) {
++	record := router.Group("inspection/alert").Use(middleware.OperationRecord())
++	read := router.Group("inspection/alert")
++	{
++		record.PATCH("status", alertApi.UpdateStatus)
++		record.DELETE("", alertApi.Delete)
++		record.DELETE("batch-delete", alertApi.BatchDelete)
++	}
++	{
++		read.GET("list", alertApi.List)
++	}
++}
+diff --git a/server/router/inspection/enter.go b/server/router/inspection/enter.go
+index bddd8578..9954401b 100644
+--- a/server/router/inspection/enter.go
++++ b/server/router/inspection/enter.go
+@@ -2,18 +2,20 @@ package inspection
+ 
+ import (
+ 	api "github.com/flipped-aurora/gin-vue-admin/server/api/v1"
+ )
+ 
+ type RouterGroup struct {
+ 	InspectionRouter
+ 	ClusterRouter
+ 	RuleRouter
+ 	TaskRouter
++	AlertRouter
+ }
+ 
+ var (
+ 	healthStubApi = api.ApiGroupApp.InspectionApiGroup.HealthStubApi
+ 	clusterApi    = api.ApiGroupApp.InspectionApiGroup.ClusterApi
+ 	ruleApi       = api.ApiGroupApp.InspectionApiGroup.RuleApi
+ 	taskApi       = api.ApiGroupApp.InspectionApiGroup.TaskApi
++	alertApi      = api.ApiGroupApp.InspectionApiGroup.AlertApi
+ )
+diff --git a/server/router/inspection/inspection.go b/server/router/inspection/inspection.go
+index 46e08904..646201d3 100644
+--- a/server/router/inspection/inspection.go
++++ b/server/router/inspection/inspection.go
+@@ -5,11 +5,12 @@ import "github.com/gin-gonic/gin"
+ type InspectionRouter struct{}
+ 
+ func (r *InspectionRouter) InitInspectionRouter(Router *gin.RouterGroup) {
+ 	g := Router.Group("inspection")
+ 	{
+ 		g.GET("ping", healthStubApi.Ping)
+ 	}
+ 	(&ClusterRouter{}).InitClusterRouter(Router)
+ 	(&RuleRouter{}).InitRuleRouter(Router)
+ 	(&TaskRouter{}).InitTaskRouter(Router)
++	(&AlertRouter{}).InitAlertRouter(Router)
+ }
+diff --git a/server/service/inspection/alert.go b/server/service/inspection/alert.go
+new file mode 100644
+index 00000000..7c2eeff8
+--- /dev/null
++++ b/server/service/inspection/alert.go
+@@ -0,0 +1,66 @@
++package inspection
++
++import (
++	"context"
++	"fmt"
++
++	"github.com/flipped-aurora/gin-vue-admin/server/global"
++	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
++	inspRequest "github.com/flipped-aurora/gin-vue-admin/server/model/inspection/request"
++)
++
++var defaultAlertService = AlertService{}
++
++type AlertService struct{}
++
++func (s *AlertService) Create(ctx context.Context, alerts []inspModel.InspAlert) error {
++	if len(alerts) == 0 {
++		return nil
++	}
++	return global.GVA_DB.WithContext(ctx).Create(&alerts).Error
++}
++
++func (s *AlertService) List(ctx context.Context, search inspRequest.AlertSearch) ([]inspModel.InspAlert, int64, error) {
++	db := global.GVA_DB.WithContext(ctx).Model(&inspModel.InspAlert{})
++	if search.Status != "" {
++		db = db.Where("status = ?", search.Status)
++	}
++	if search.Level != "" {
++		db = db.Where("level = ?", search.Level)
++	}
++	if search.RuleType != "" {
++		db = db.Where("rule_type = ?", search.RuleType)
++	}
++	var total int64
++	if err := db.Count(&total).Error; err != nil {
++		return nil, 0, err
++	}
++	limit, offset := search.LimitOffset()
++	var alerts []inspModel.InspAlert
++	if err := db.Order("id DESC").Limit(limit).Offset(offset).Find(&alerts).Error; err != nil {
++		return nil, 0, err
++	}
++	return alerts, total, nil
++}
++
++func (s *AlertService) UpdateStatus(ctx context.Context, id uint, status string) error {
++	if !validAlertStatus(status) {
++		return fmt.Errorf("无效告警状态: %s", status)
++	}
++	return global.GVA_DB.WithContext(ctx).Model(&inspModel.InspAlert{}).Where("id = ?", id).Update("status", status).Error
++}
++
++func (s *AlertService) Delete(ctx context.Context, id uint) error {
++	return global.GVA_DB.WithContext(ctx).Delete(&inspModel.InspAlert{}, "id = ?", id).Error
++}
++
++func (s *AlertService) DeleteByIDs(ctx context.Context, ids []uint) error {
++	if len(ids) == 0 {
++		return nil
++	}
++	return global.GVA_DB.WithContext(ctx).Where("id IN ?", ids).Delete(&inspModel.InspAlert{}).Error
++}
++
++func validAlertStatus(status string) bool {
++	return status == "open" || status == "acknowledged" || status == "closed"
++}
+diff --git a/server/service/inspection/alert_service_test.go b/server/service/inspection/alert_service_test.go
+new file mode 100644
+index 00000000..e65f6d30
+--- /dev/null
++++ b/server/service/inspection/alert_service_test.go
+@@ -0,0 +1,48 @@
++package inspection
++
++import (
++	"context"
++	"testing"
++	"time"
++
++	"github.com/flipped-aurora/gin-vue-admin/server/internal/testutil"
++	commonRequest "github.com/flipped-aurora/gin-vue-admin/server/model/common/request"
++	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
++	inspRequest "github.com/flipped-aurora/gin-vue-admin/server/model/inspection/request"
++)
++
++func TestAlertServiceFiltersAndUpdatesStatus(t *testing.T) {
++	testutil.NewMemoryDB(t, &inspModel.InspAlert{})
++	ctx := context.Background()
++	alerts := []inspModel.InspAlert{
++		{InspectionID: 1, RuleType: "node_cpu", Level: "warning", Status: "open", Content: "cpu", CollectedAt: time.Now()},
++		{InspectionID: 1, RuleType: "pod_failed", Level: "critical", Status: "open", Content: "pod", CollectedAt: time.Now()},
++	}
++	if err := defaultAlertService.Create(ctx, alerts); err != nil {
++		t.Fatalf("create alerts: %v", err)
++	}
++
++	list, total, err := defaultAlertService.List(ctx, inspRequest.AlertSearch{
++		PageInfo: commonRequest.PageInfo{Page: 1, PageSize: 10},
++		Level:    "critical",
++	})
++	if err != nil {
++		t.Fatalf("list alerts: %v", err)
++	}
++	if total != 1 || len(list) != 1 || list[0].RuleType != "pod_failed" {
++		t.Fatalf("unexpected filtered alerts: total=%d list=%+v", total, list)
++	}
++	if err := defaultAlertService.UpdateStatus(ctx, list[0].ID, "acknowledged"); err != nil {
++		t.Fatalf("update status: %v", err)
++	}
++	updated, _, err := defaultAlertService.List(ctx, inspRequest.AlertSearch{
++		PageInfo: commonRequest.PageInfo{Page: 1, PageSize: 10},
++		Status:   "acknowledged",
++	})
++	if err != nil {
++		t.Fatalf("list updated alerts: %v", err)
++	}
++	if len(updated) != 1 || updated[0].ID != list[0].ID {
++		t.Fatalf("unexpected acknowledged alerts: %+v", updated)
++	}
++}
+diff --git a/server/service/inspection/engine.go b/server/service/inspection/engine.go
+index 3e364284..930a5840 100644
+--- a/server/service/inspection/engine.go
++++ b/server/service/inspection/engine.go
+@@ -63,20 +63,35 @@ func (e *Engine) Run(ctx context.Context, taskID uint) (*inspModel.InspInspectio
+ 		}
+ 	}
+ 	now := time.Now()
+ 	inspection.Status = "success"
+ 	inspection.AnomalyCount = anomalyCount
+ 	inspection.Summary = fmt.Sprintf("巡检完成，共 %d 项，异常 %d 项", len(details), anomalyCount)
+ 	inspection.FinishedAt = &now
+ 	if err := global.GVA_DB.WithContext(ctx).Save(inspection).Error; err != nil {
+ 		return nil, err
+ 	}
++	if anomalyCount > 0 {
++		alerts, samples := alertsFromDetails(inspection.ID, details)
++		if err := defaultAlertService.Create(ctx, alerts); err != nil {
++			return nil, err
++		}
++		_ = NotifyWebhook(global.GVA_CONFIG.Inspection.WebhookURL, AlertWebhookPayload{
++			TaskID:       task.ID,
++			TaskName:     task.Name,
++			ClusterName:  task.Cluster.Name,
++			InspectionID: inspection.ID,
++			AnomalyCount: anomalyCount,
++			Summary:      inspection.Summary,
++			Samples:      samples,
++		})
++	}
+ 	return inspection, nil
+ }
+ 
+ func (e *Engine) failInspection(ctx context.Context, inspection *inspModel.InspInspection, cause error) error {
+ 	now := time.Now()
+ 	inspection.Status = "failed"
+ 	inspection.Summary = fmt.Sprintf("巡检失败：%v", cause)
+ 	inspection.FinishedAt = &now
+ 	if err := global.GVA_DB.WithContext(ctx).Save(inspection).Error; err != nil {
+ 		return fmt.Errorf("%w; 更新巡检失败状态失败: %v", cause, err)
+@@ -232,10 +247,43 @@ func evaluateRules(ctx context.Context, inspector k8s.Inspector, rules []inspMod
+ func normalizeRuleType(ruleType string) string {
+ 	switch ruleType {
+ 	case "cpu_high":
+ 		return "node_cpu"
+ 	case "mem_high":
+ 		return "node_memory"
+ 	default:
+ 		return ruleType
+ 	}
+ }
++
++func alertsFromDetails(inspectionID uint, details []inspModel.InspInspectionDetail) ([]inspModel.InspAlert, []string) {
++	now := time.Now()
++	alerts := make([]inspModel.InspAlert, 0)
++	samples := make([]string, 0, 5)
++	for _, detail := range details {
++		if !detail.IsAnomaly {
++			continue
++		}
++		content := fmt.Sprintf("%s: %s", detail.ResourceName, detail.Message)
++		alerts = append(alerts, inspModel.InspAlert{
++			InspectionID: inspectionID,
++			RuleType:     detail.RuleType,
++			Level:        alertLevel(detail.RuleType),
++			Status:       "open",
++			Content:      content,
++			CollectedAt:  now,
++		})
++		if len(samples) < cap(samples) {
++			samples = append(samples, content)
++		}
++	}
++	return alerts, samples
++}
++
++func alertLevel(ruleType string) string {
++	switch normalizeRuleType(ruleType) {
++	case "node_not_ready", "pod_failed", "pod_oomkilled", "pod_crash_loop", "pod_evicted":
++		return "critical"
++	default:
++		return "warning"
++	}
++}
+diff --git a/server/service/inspection/engine_test.go b/server/service/inspection/engine_test.go
+index 3aa46cda..88d1ecd9 100644
+--- a/server/service/inspection/engine_test.go
++++ b/server/service/inspection/engine_test.go
+@@ -13,20 +13,21 @@ import (
+ )
+ 
+ func TestEngineRunWithStubMarksAnomalies(t *testing.T) {
+ 	db := testutil.NewMemoryDB(t,
+ 		&inspModel.InspCluster{},
+ 		&inspModel.InspRule{},
+ 		&inspModel.InspTask{},
+ 		&inspModel.InspTaskRule{},
+ 		&inspModel.InspInspection{},
+ 		&inspModel.InspInspectionDetail{},
++		&inspModel.InspAlert{},
+ 	)
+ 	cluster := inspModel.InspCluster{Name: "stub 集群"}
+ 	rules := []inspModel.InspRule{
+ 		{Name: "节点未就绪", RuleType: "node_not_ready", Enabled: true},
+ 		{Name: "Pod 非运行", RuleType: "pod_not_running", Enabled: true},
+ 	}
+ 	task := inspModel.InspTask{Name: "巡检任务", Cluster: &cluster, Rules: rules, Status: "active"}
+ 	if err := db.Create(&task).Error; err != nil {
+ 		t.Fatalf("创建巡检任务失败: %v", err)
+ 	}
+@@ -51,20 +52,21 @@ func TestEngineRunWithStubMarksAnomalies(t *testing.T) {
+ }
+ 
+ func TestEngineRespectsNamespaceScope(t *testing.T) {
+ 	db := testutil.NewMemoryDB(t,
+ 		&inspModel.InspCluster{},
+ 		&inspModel.InspRule{},
+ 		&inspModel.InspTask{},
+ 		&inspModel.InspTaskRule{},
+ 		&inspModel.InspInspection{},
+ 		&inspModel.InspInspectionDetail{},
++		&inspModel.InspAlert{},
+ 	)
+ 	cluster := inspModel.InspCluster{Name: "测试集群"}
+ 	rule := inspModel.InspRule{
+ 		Name: "指定命名空间 Pod 非运行", RuleType: "pod_not_running",
+ 		Scope: "namespace", Namespace: "ns-a", Enabled: true,
+ 	}
+ 	task := inspModel.InspTask{Name: "命名空间巡检", Cluster: &cluster, Rules: []inspModel.InspRule{rule}}
+ 	if err := db.Create(&task).Error; err != nil {
+ 		t.Fatalf("创建巡检任务失败: %v", err)
+ 	}
+@@ -106,20 +108,21 @@ func (namespaceInspector) ListNamespaces(context.Context) ([]k8s.NamespaceInfo,
+ }
+ 
+ func TestEngineRejectsConcurrentRunOnSameTask(t *testing.T) {
+ 	db := testutil.NewMemoryDB(t,
+ 		&inspModel.InspCluster{},
+ 		&inspModel.InspRule{},
+ 		&inspModel.InspTask{},
+ 		&inspModel.InspTaskRule{},
+ 		&inspModel.InspInspection{},
+ 		&inspModel.InspInspectionDetail{},
++		&inspModel.InspAlert{},
+ 	)
+ 	cluster := inspModel.InspCluster{Name: "并发测试集群"}
+ 	rule := inspModel.InspRule{Name: "节点未就绪", RuleType: "node_not_ready", Enabled: true}
+ 	task := inspModel.InspTask{Name: "并发巡检", Cluster: &cluster, Rules: []inspModel.InspRule{rule}, Status: "active"}
+ 	if err := db.Create(&task).Error; err != nil {
+ 		t.Fatalf("创建巡检任务失败: %v", err)
+ 	}
+ 
+ 	slow := newSlowInspector()
+ 	engine := NewEngine(func(inspModel.InspCluster) k8s.Inspector { return slow })
+@@ -147,22 +150,22 @@ func TestEngineRejectsConcurrentRunOnSameTask(t *testing.T) {
+ 
+ 	close(slow.release)
+ 	wg.Wait()
+ 
+ 	if _, err := engine.Run(context.Background(), task.ID); err != nil {
+ 		t.Fatalf("首次 Run 结束后再次 Run 应成功: %v", err)
+ 	}
+ }
+ 
+ type slowInspector struct {
+-	started  chan struct{}
+-	release  chan struct{}
++	started   chan struct{}
++	release   chan struct{}
+ 	startOnce sync.Once
+ }
+ 
+ func newSlowInspector() *slowInspector {
+ 	return &slowInspector{
+ 		started: make(chan struct{}),
+ 		release: make(chan struct{}),
+ 	}
+ }
+ 
+diff --git a/server/service/inspection/enter.go b/server/service/inspection/enter.go
+index 70160931..180f9a59 100644
+--- a/server/service/inspection/enter.go
++++ b/server/service/inspection/enter.go
+@@ -1,7 +1,8 @@
+ package inspection
+ 
+ type ServiceGroup struct {
+ 	ClusterService
+ 	RuleService
+ 	TaskService
++	AlertService
+ }
+diff --git a/server/service/inspection/task.go b/server/service/inspection/task.go
+index 31f95517..85115cad 100644
+--- a/server/service/inspection/task.go
++++ b/server/service/inspection/task.go
+@@ -1,38 +1,45 @@
+ package inspection
+ 
+ import (
+ 	"context"
++	"encoding/json"
+ 	"fmt"
+ 
+ 	"github.com/flipped-aurora/gin-vue-admin/server/global"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/model/common/request"
+ 	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
+ 	inspRequest "github.com/flipped-aurora/gin-vue-admin/server/model/inspection/request"
++	sysModel "github.com/flipped-aurora/gin-vue-admin/server/model/system"
++	"github.com/flipped-aurora/gin-vue-admin/server/service/system"
++	"gorm.io/datatypes"
+ )
+ 
+ var defaultEngine = NewEngine(nil)
+ 
+ type TaskService struct{}
+ 
+ func (s *TaskService) Create(ctx context.Context, input inspRequest.CreateTask) (*inspModel.InspTask, error) {
+ 	rules, err := findTaskRules(ctx, input.RuleIDs)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 	task := inspModel.InspTask{
+ 		Name: input.Name, ClusterID: input.ClusterID, CronExpr: input.CronExpr,
+ 		ScheduleType: "cron", Status: "active", Rules: rules,
+ 	}
+ 	if err := global.GVA_DB.WithContext(ctx).Create(&task).Error; err != nil {
+ 		return nil, err
+ 	}
++	if err := s.syncTimedTask(ctx, &task); err != nil {
++		return nil, err
++	}
+ 	return s.Get(ctx, task.ID)
+ }
+ 
+ func (s *TaskService) Update(ctx context.Context, id uint, input inspRequest.UpdateTask) (*inspModel.InspTask, error) {
+ 	task, err := s.Get(ctx, id)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 	rules, err := findTaskRules(ctx, input.RuleIDs)
+ 	if err != nil {
+@@ -43,31 +50,39 @@ func (s *TaskService) Update(ctx context.Context, id uint, input inspRequest.Upd
+ 	task.CronExpr = input.CronExpr
+ 	if input.Status != "" {
+ 		task.Status = input.Status
+ 	}
+ 	if err := global.GVA_DB.WithContext(ctx).Model(task).Association("Rules").Replace(rules); err != nil {
+ 		return nil, err
+ 	}
+ 	if err := global.GVA_DB.WithContext(ctx).Save(task).Error; err != nil {
+ 		return nil, err
+ 	}
++	if err := s.syncTimedTask(ctx, task); err != nil {
++		return nil, err
++	}
+ 	return s.Get(ctx, task.ID)
+ }
+ 
+ func (s *TaskService) Delete(ctx context.Context, id uint) error {
+ 	task, err := s.Get(ctx, id)
+ 	if err != nil {
+ 		return err
+ 	}
+ 	if err := global.GVA_DB.WithContext(ctx).Model(task).Association("Rules").Clear(); err != nil {
+ 		return err
+ 	}
++	if task.TimedTaskID != nil {
++		if err := system.TimedTaskServiceApp.DeleteTimedTask(ctx, *task.TimedTaskID); err != nil {
++			return err
++		}
++	}
+ 	return global.GVA_DB.WithContext(ctx).Delete(task).Error
+ }
+ 
+ func (s *TaskService) Get(ctx context.Context, id uint) (*inspModel.InspTask, error) {
+ 	var task inspModel.InspTask
+ 	if err := global.GVA_DB.WithContext(ctx).Preload("Cluster").Preload("Rules").First(&task, id).Error; err != nil {
+ 		return nil, err
+ 	}
+ 	return &task, nil
+ }
+@@ -119,10 +134,45 @@ func findTaskRules(ctx context.Context, ids []uint) ([]inspModel.InspRule, error
+ 	}
+ 	var rules []inspModel.InspRule
+ 	if err := global.GVA_DB.WithContext(ctx).Where("id IN ?", ids).Find(&rules).Error; err != nil {
+ 		return nil, err
+ 	}
+ 	if len(rules) != len(ids) {
+ 		return nil, fmt.Errorf("包含不存在的巡检规则")
+ 	}
+ 	return rules, nil
+ }
++
++func (s *TaskService) syncTimedTask(ctx context.Context, inspectionTask *inspModel.InspTask) error {
++	if inspectionTask.CronExpr == "" {
++		if inspectionTask.TimedTaskID != nil {
++			return system.TimedTaskServiceApp.ToggleTimedTask(ctx, *inspectionTask.TimedTaskID, false)
++		}
++		return nil
++	}
++
++	params, err := json.Marshal(struct {
++		TaskID uint `json:"taskId"`
++	}{TaskID: inspectionTask.ID})
++	if err != nil {
++		return err
++	}
++	timedTask := sysModel.SysTimedTask{
++		Name:         fmt.Sprintf("insp-task-%d", inspectionTask.ID),
++		Description:  "执行 K8s 巡检任务",
++		Spec:         inspectionTask.CronExpr,
++		WithSeconds:  false,
++		ExecutorType: sysModel.TimedTaskExecutorMethod,
++		MethodName:   "RunInspectionTask",
++		Params:       datatypes.JSON(params),
++		Enabled:      inspectionTask.Status == "active",
++	}
++	if inspectionTask.TimedTaskID == nil {
++		if err := system.TimedTaskServiceApp.CreateTimedTask(ctx, &timedTask); err != nil {
++			return err
++		}
++		inspectionTask.TimedTaskID = &timedTask.ID
++		return global.GVA_DB.WithContext(ctx).Model(inspectionTask).Update("timed_task_id", timedTask.ID).Error
++	}
++	timedTask.ID = *inspectionTask.TimedTaskID
++	return system.TimedTaskServiceApp.UpdateTimedTask(ctx, &timedTask)
++}
+diff --git a/server/service/inspection/webhook.go b/server/service/inspection/webhook.go
+new file mode 100644
+index 00000000..112e660b
+--- /dev/null
++++ b/server/service/inspection/webhook.go
+@@ -0,0 +1,101 @@
++package inspection
++
++import (
++	"bytes"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net/http"
++	"strings"
++	"time"
++)
++
++type AlertWebhookPayload struct {
++	TaskID       uint
++	TaskName     string
++	ClusterName  string
++	InspectionID uint
++	AnomalyCount int
++	Summary      string
++	Samples      []string
++}
++
++func NotifyWebhook(webhookURL string, payload AlertWebhookPayload) error {
++	webhookURL = strings.TrimSpace(webhookURL)
++	if webhookURL == "" {
++		return nil
++	}
++
++	content := formatAlertWebhookContent(payload)
++	var body any
++	if strings.Contains(webhookURL, "oapi.dingtalk.com") {
++		body = map[string]any{
++			"msgtype": "text",
++			"text":    map[string]string{"content": content},
++		}
++	} else {
++		body = map[string]any{
++			"event":        "inspection_anomaly",
++			"taskId":       payload.TaskID,
++			"taskName":     payload.TaskName,
++			"clusterName":  payload.ClusterName,
++			"inspectionId": payload.InspectionID,
++			"anomalyCount": payload.AnomalyCount,
++			"summary":      payload.Summary,
++			"samples":      payload.Samples,
++			"message":      content,
++		}
++	}
++	raw, err := json.Marshal(body)
++	if err != nil {
++		return err
++	}
++
++	request, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewReader(raw))
++	if err != nil {
++		return err
++	}
++	request.Header.Set("Content-Type", "application/json; charset=utf-8")
++	client := &http.Client{Timeout: 8 * time.Second}
++	response, err := client.Do(request)
++	if err != nil {
++		return err
++	}
++	defer response.Body.Close()
++	responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
++	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
++		return fmt.Errorf("webhook http %d: %s", response.StatusCode, strings.TrimSpace(string(responseBody)))
++	}
++	if strings.Contains(webhookURL, "oapi.dingtalk.com") {
++		var result struct {
++			ErrCode int    `json:"errcode"`
++			ErrMsg  string `json:"errmsg"`
++		}
++		if json.Unmarshal(responseBody, &result) == nil && result.ErrCode != 0 {
++			return fmt.Errorf("dingtalk errcode=%d errmsg=%s", result.ErrCode, result.ErrMsg)
++		}
++	}
++	return nil
++}
++
++func formatAlertWebhookContent(payload AlertWebhookPayload) string {
++	var content strings.Builder
++	content.WriteString("【日志】【信息】K8s 巡检告警\n")
++	content.WriteString(fmt.Sprintf("任务: %s (id=%d)\n", displayValue(payload.TaskName), payload.TaskID))
++	content.WriteString(fmt.Sprintf("集群: %s\n", displayValue(payload.ClusterName)))
++	content.WriteString(fmt.Sprintf("巡检ID: %d\n异常数: %d\n", payload.InspectionID, payload.AnomalyCount))
++	if payload.Summary != "" {
++		content.WriteString("摘要: " + payload.Summary + "\n")
++	}
++	for _, sample := range payload.Samples {
++		content.WriteString("- " + sample + "\n")
++	}
++	return content.String()
++}
++
++func displayValue(value string) string {
++	if strings.TrimSpace(value) == "" {
++		return "-"
++	}
++	return value
++}
+diff --git a/server/service/inspection/webhook_test.go b/server/service/inspection/webhook_test.go
+new file mode 100644
+index 00000000..d76ab9c2
+--- /dev/null
++++ b/server/service/inspection/webhook_test.go
+@@ -0,0 +1,67 @@
++package inspection
++
++import (
++	"encoding/json"
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++)
++
++func TestDingTalkPayloadContainsKeywords(t *testing.T) {
++	var payload struct {
++		MsgType string `json:"msgtype"`
++		Text    struct {
++			Content string `json:"content"`
++		} `json:"text"`
++	}
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if r.Method != http.MethodPost {
++			t.Errorf("method = %s, want POST", r.Method)
++		}
++		body, err := io.ReadAll(r.Body)
++		if err != nil {
++			t.Fatalf("read request body: %v", err)
++		}
++		if err := json.Unmarshal(body, &payload); err != nil {
++			t.Fatalf("decode payload: %v", err)
++		}
++		w.Header().Set("Content-Type", "application/json")
++		_, _ = w.Write([]byte(`{"errcode":0}`))
++	}))
++	defer server.Close()
++
++	err := NotifyWebhook(server.URL+"/oapi.dingtalk.com", AlertWebhookPayload{
++		TaskID:       7,
++		TaskName:     "daily",
++		ClusterName:  "prod",
++		InspectionID: 9,
++		AnomalyCount: 1,
++		Summary:      "发现异常",
++		Samples:      []string{"node-1 CPU 95%"},
++	})
++	if err != nil {
++		t.Fatalf("NotifyWebhook: %v", err)
++	}
++	if payload.MsgType != "text" {
++		t.Fatalf("msgtype = %q, want text", payload.MsgType)
++	}
++	for _, keyword := range []string{"日志", "信息", "daily", "node-1"} {
++		if !strings.Contains(payload.Text.Content, keyword) {
++			t.Errorf("content missing %q: %s", keyword, payload.Text.Content)
++		}
++	}
++}
++
++func TestNotifyWebhookReturnsDingTalkError(t *testing.T) {
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
++		_, _ = w.Write([]byte(`{"errcode":310000,"errmsg":"invalid webhook"}`))
++	}))
++	defer server.Close()
++
++	err := NotifyWebhook(server.URL+"/oapi.dingtalk.com", AlertWebhookPayload{})
++	if err == nil || !strings.Contains(err.Error(), "310000") {
++		t.Fatalf("err = %v, want DingTalk errcode", err)
++	}
++}
+diff --git a/server/source/inspection/api.go b/server/source/inspection/api.go
+index 2529355c..5651d72e 100644
+--- a/server/source/inspection/api.go
++++ b/server/source/inspection/api.go
+@@ -70,12 +70,16 @@ func inspectionAPIs() []sysModel.SysApi {
+ 		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/rule", Description: "删除巡检规则"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/rule/list", Description: "获取巡检规则列表"},
+ 		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/rule/enabled", Description: "启停巡检规则"},
+ 		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/task", Description: "创建巡检任务"},
+ 		{ApiGroup: "K8s巡检", Method: "PUT", Path: "/inspection/task", Description: "更新巡检任务"},
+ 		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/task", Description: "删除巡检任务"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/task", Description: "获取巡检任务"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/task/list", Description: "获取巡检任务列表"},
+ 		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/task/run", Description: "立即执行巡检任务"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/task/inspections", Description: "获取巡检任务历史"},
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/alert/list", Description: "获取巡检告警列表"},
++		{ApiGroup: "K8s巡检", Method: "PATCH", Path: "/inspection/alert/status", Description: "更新巡检告警状态"},
++		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/alert", Description: "删除巡检告警"},
++		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/alert/batch-delete", Description: "批量删除巡检告警"},
+ 	}
+ }
+diff --git a/server/source/inspection/menu.go b/server/source/inspection/menu.go
+index ce5ef280..575097e8 100644
+--- a/server/source/inspection/menu.go
++++ b/server/source/inspection/menu.go
+@@ -41,20 +41,21 @@ func (i *initMenu) InitializeData(ctx context.Context) (context.Context, error)
+ 		MenuLevel: 0, Path: "inspection", Name: "inspection", Component: "view/routerHolder.vue", Sort: 9,
+ 		Meta: sysModel.Meta{Title: "K8s 巡检", Icon: "monitor-gva"},
+ 	}
+ 	if err := db.Where("name = ?", parent.Name).FirstOrCreate(&parent).Error; err != nil {
+ 		return ctx, errors.Wrap(err, "初始化巡检父菜单失败")
+ 	}
+ 	children := []sysModel.SysBaseMenu{
+ 		{MenuLevel: 1, ParentId: parent.ID, Path: "cluster", Name: "inspectionCluster", Component: "view/inspection/cluster.vue", Sort: 1, Meta: sysModel.Meta{Title: "集群管理", Icon: "connection"}},
+ 		{MenuLevel: 1, ParentId: parent.ID, Path: "rule", Name: "inspectionRule", Component: "view/inspection/rule.vue", Sort: 2, Meta: sysModel.Meta{Title: "巡检规则", Icon: "set-up"}},
+ 		{MenuLevel: 1, ParentId: parent.ID, Path: "task", Name: "inspectionTask", Component: "view/inspection/task.vue", Sort: 3, Meta: sysModel.Meta{Title: "巡检任务", Icon: "calendar"}},
++		{MenuLevel: 1, ParentId: parent.ID, Path: "alert", Name: "inspectionAlert", Component: "view/inspection/alert.vue", Sort: 4, Meta: sysModel.Meta{Title: "巡检告警", Icon: "warning"}},
+ 	}
+ 	for _, menu := range children {
+ 		if err := db.Where("name = ?", menu.Name).FirstOrCreate(&menu).Error; err != nil {
+ 			return ctx, errors.Wrap(err, "初始化巡检子菜单失败")
+ 		}
+ 	}
+ 	var admin sysModel.SysAuthority
+ 	if err := db.Where("authority_id = ?", 888).First(&admin).Error; err != nil {
+ 		return ctx, errors.Wrap(err, "查询超级管理员失败")
+ 	}
+@@ -63,12 +64,12 @@ func (i *initMenu) InitializeData(ctx context.Context) (context.Context, error)
+ 		return ctx, errors.Wrap(err, "授予巡检菜单权限失败")
+ 	}
+ 	return ctx, nil
+ }
+ 
+ func (i *initMenu) DataInserted(ctx context.Context) bool {
+ 	db, ok := ctx.Value("db").(*gorm.DB)
+ 	if !ok {
+ 		return false
+ 	}
+-	return db.Where("name = ?", "inspectionTask").First(&sysModel.SysBaseMenu{}).Error == nil
++	return db.Where("name = ?", "inspectionAlert").First(&sysModel.SysBaseMenu{}).Error == nil
+ }
+diff --git a/web/src/api/inspection.js b/web/src/api/inspection.js
+index 71f16491..b7379382 100644
+--- a/web/src/api/inspection.js
++++ b/web/src/api/inspection.js
+@@ -33,10 +33,18 @@ export const createTask = (data) => request('/inspection/task', 'post', data)
+ export const updateTask = (id, data) =>
+   request('/inspection/task', 'put', data, { id })
+ export const deleteTask = (data) => request('/inspection/task', 'delete', data)
+ export const getTask = (params) =>
+   request('/inspection/task', 'get', undefined, params)
+ export const getTaskList = (params) =>
+   request('/inspection/task/list', 'get', undefined, params)
+ export const runTask = (data) => request('/inspection/task/run', 'post', data)
+ export const getTaskInspections = (params) =>
+   request('/inspection/task/inspections', 'get', undefined, params)
++
++export const getAlertList = (params) =>
++  request('/inspection/alert/list', 'get', undefined, params)
++export const updateAlertStatus = (id, data) =>
++  request('/inspection/alert/status', 'patch', data, { id })
++export const deleteAlert = (data) => request('/inspection/alert', 'delete', data)
++export const batchDeleteAlerts = (data) =>
++  request('/inspection/alert/batch-delete', 'delete', data)
+diff --git a/web/src/view/inspection/alert.vue b/web/src/view/inspection/alert.vue
+new file mode 100644
+index 00000000..ba1efc2c
+--- /dev/null
++++ b/web/src/view/inspection/alert.vue
+@@ -0,0 +1,95 @@
++<template>
++  <div class="gva-table-box">
++    <div class="gva-btn-list">
++      <el-select v-model="search.status" clearable placeholder="告警状态" class="w-32">
++        <el-option label="待处理" value="open" />
++        <el-option label="已确认" value="acknowledged" />
++        <el-option label="已关闭" value="closed" />
++      </el-select>
++      <el-select v-model="search.level" clearable placeholder="告警级别" class="w-32">
++        <el-option label="严重" value="critical" />
++        <el-option label="警告" value="warning" />
++      </el-select>
++      <el-input v-model="search.ruleType" clearable class="w-40" placeholder="规则类型" @keyup.enter="loadAlerts" />
++      <el-button icon="search" @click="loadAlerts">查询</el-button>
++      <el-button :disabled="selectedIDs.length === 0" type="danger" plain @click="removeSelected">批量删除</el-button>
++    </div>
++
++    <el-table :data="alerts" row-key="ID" @selection-change="(rows) => { selectedIDs = rows.map((row) => row.ID) }">
++      <el-table-column type="selection" width="48" />
++      <el-table-column prop="ID" label="编号" width="78" />
++      <el-table-column prop="ruleType" label="规则类型" min-width="150" />
++      <el-table-column label="级别" width="90">
++        <template #default="{ row }"><el-tag :type="row.level === 'critical' ? 'danger' : 'warning'">{{ row.level }}</el-tag></template>
++      </el-table-column>
++      <el-table-column label="状态" width="120">
++        <template #default="{ row }">
++          <el-select :model-value="row.status" size="small" @change="(status) => setStatus(row, status)">
++            <el-option label="待处理" value="open" />
++            <el-option label="已确认" value="acknowledged" />
++            <el-option label="已关闭" value="closed" />
++          </el-select>
++        </template>
++      </el-table-column>
++      <el-table-column prop="content" label="告警内容" min-width="280" show-overflow-tooltip />
++      <el-table-column prop="collectedAt" label="采集时间" min-width="170" />
++      <el-table-column label="操作" width="90" fixed="right">
++        <template #default="{ row }"><el-button link type="danger" @click="remove(row)">删除</el-button></template>
++      </el-table-column>
++    </el-table>
++    <div class="gva-pagination">
++      <el-pagination :current-page="page" :page-size="pageSize" :total="total" layout="total, prev, pager, next" @current-change="changePage" />
++    </div>
++  </div>
++</template>
++
++<script setup>
++  import { ref } from 'vue'
++  import { ElMessage, ElMessageBox } from 'element-plus'
++  import { batchDeleteAlerts, deleteAlert, getAlertList, updateAlertStatus } from '@/api/inspection'
++
++  defineOptions({ name: 'InspectionAlert' })
++
++  const alerts = ref([])
++  const total = ref(0)
++  const page = ref(1)
++  const pageSize = 10
++  const search = ref({ status: '', level: '', ruleType: '' })
++  const selectedIDs = ref([])
++
++  const loadAlerts = async () => {
++    const result = await getAlertList({ page: page.value, pageSize, ...search.value })
++    if (result.code === 0) {
++      alerts.value = result.data.list
++      total.value = result.data.total
++    }
++  }
++  const changePage = (value) => {
++    page.value = value
++    loadAlerts()
++  }
++  const setStatus = async (alert, status) => {
++    const result = await updateAlertStatus(alert.ID, { status })
++    if (result.code === 0) {
++      ElMessage.success('告警状态已更新')
++      alert.status = status
++    }
++  }
++  const remove = (alert) => ElMessageBox.confirm(`删除告警 #${alert.ID}？`, '确认删除', { type: 'warning' }).then(async () => {
++    const result = await deleteAlert({ id: alert.ID })
++    if (result.code === 0) {
++      ElMessage.success('告警已删除')
++      loadAlerts()
++    }
++  })
++  const removeSelected = () => ElMessageBox.confirm(`删除已选的 ${selectedIDs.value.length} 条告警？`, '确认删除', { type: 'warning' }).then(async () => {
++    const result = await batchDeleteAlerts({ ids: selectedIDs.value })
++    if (result.code === 0) {
++      ElMessage.success('告警已删除')
++      selectedIDs.value = []
++      loadAlerts()
++    }
++  })
++
++  loadAlerts()
++</script>

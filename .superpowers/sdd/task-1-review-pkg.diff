@@ -1,0 +1,711 @@
+# Review Package
+BASE: b1d2004e2ad29c74e721968674e499a9c2cde8b8
+HEAD: 160187254e91ddcfeea2a40e41bccee58c08508a
+
+## Commits
+16018725 feat(inspection): add config, models, and domain wiring skeleton
+
+## Stat
+ server/api/v1/enter.go                        |  8 ++-
+ server/api/v1/inspection/enter.go             |  7 +++
+ server/api/v1/inspection/health_stub.go       | 11 ++++
+ server/config.yaml                            |  8 +++
+ server/config/config.go                       |  2 +
+ server/config/inspection.go                   | 10 +++
+ server/initialize/ensure_tables.go            | 19 ++++++
+ server/initialize/gorm.go                     | 10 +++
+ server/initialize/router.go                   |  2 +
+ server/model/inspection/alert.go              | 19 ++++++
+ server/model/inspection/cluster.go            | 14 +++++
+ server/model/inspection/inspection.go         | 34 +++++++++++
+ server/model/inspection/report.go             | 14 +++++
+ server/model/inspection/request/inspection.go | 88 +++++++++++++++++++++++++++
+ server/model/inspection/rule.go               | 15 +++++
+ server/model/inspection/table_name_test.go    | 20 ++++++
+ server/model/inspection/task.go               | 24 ++++++++
+ server/router/enter.go                        |  8 ++-
+ server/router/inspection/enter.go             | 13 ++++
+ server/router/inspection/inspection.go        | 12 ++++
+ server/service/enter.go                       |  8 ++-
+ server/service/inspection/enter.go            |  7 +++
+ 22 files changed, 344 insertions(+), 9 deletions(-)
+
+## Diff
+diff --git a/server/api/v1/enter.go b/server/api/v1/enter.go
+index c10e13bb..1be55cbe 100644
+--- a/server/api/v1/enter.go
++++ b/server/api/v1/enter.go
+@@ -1,15 +1,17 @@
+ package v1
+ 
+ import (
+ 	"github.com/flipped-aurora/gin-vue-admin/server/api/v1/example"
++	"github.com/flipped-aurora/gin-vue-admin/server/api/v1/inspection"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/api/v1/media"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/api/v1/system"
+ )
+ 
+ var ApiGroupApp = new(ApiGroup)
+ 
+ type ApiGroup struct {
+-	SystemApiGroup  system.ApiGroup
+-	ExampleApiGroup example.ApiGroup
+-	MediaApiGroup   media.ApiGroup
++	SystemApiGroup     system.ApiGroup
++	ExampleApiGroup    example.ApiGroup
++	MediaApiGroup      media.ApiGroup
++	InspectionApiGroup inspection.ApiGroup
+ }
+diff --git a/server/api/v1/inspection/enter.go b/server/api/v1/inspection/enter.go
+new file mode 100644
+index 00000000..bc786c2c
+--- /dev/null
++++ b/server/api/v1/inspection/enter.go
+@@ -0,0 +1,7 @@
++package inspection
++
++type HealthStubApi struct{}
++
++type ApiGroup struct {
++	HealthStubApi
++}
+diff --git a/server/api/v1/inspection/health_stub.go b/server/api/v1/inspection/health_stub.go
+new file mode 100644
+index 00000000..b0eeab53
+--- /dev/null
++++ b/server/api/v1/inspection/health_stub.go
+@@ -0,0 +1,11 @@
++package inspection
++
++import (
++	"github.com/flipped-aurora/gin-vue-admin/server/model/common/response"
++	"github.com/gin-gonic/gin"
++)
++
++// Ping 临时健康占位，后续任务替换为真实 API
++func (h *HealthStubApi) Ping(c *gin.Context) {
++	response.OkWithMessage("pong", c)
++}
+diff --git a/server/config.yaml b/server/config.yaml
+index 883f1220..8e74e43d 100644
+--- a/server/config.yaml
++++ b/server/config.yaml
+@@ -287,10 +287,18 @@ cors:
+         - allow-origin: example2.com
+           allow-headers: content-type
+           allow-methods: GET, POST
+           expose-headers: Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type
+           allow-credentials: true # 布尔值
+ mcp:
+     name: GVA_MCP
+     version: v1.0.0
+     addr: 8889
+     separate: false
++
++inspection:
++  kube-config-dir: uploads/kubeconfigs
++  force-stub: false
++  webhook-url: ""
++  ai-base-url: ""
++  ai-api-key: ""
++  ai-model: ""
+diff --git a/server/config/config.go b/server/config/config.go
+index c03c3237..0e56a69b 100644
+--- a/server/config/config.go
++++ b/server/config/config.go
+@@ -25,20 +25,22 @@ type Server struct {
+ 	HuaWeiObs    HuaWeiObs    `mapstructure:"hua-wei-obs" json:"hua-wei-obs" yaml:"hua-wei-obs"`
+ 	TencentCOS   TencentCOS   `mapstructure:"tencent-cos" json:"tencent-cos" yaml:"tencent-cos"`
+ 	AwsS3        AwsS3        `mapstructure:"aws-s3" json:"aws-s3" yaml:"aws-s3"`
+ 	CloudflareR2 CloudflareR2 `mapstructure:"cloudflare-r2" json:"cloudflare-r2" yaml:"cloudflare-r2"`
+ 	Minio        Minio        `mapstructure:"minio" json:"minio" yaml:"minio"`
+ 
+ 	Excel Excel `mapstructure:"excel" json:"excel" yaml:"excel"`
+ 
+ 	Media Media `mapstructure:"media" json:"media" yaml:"media"`
+ 
++	Inspection Inspection `mapstructure:"inspection" json:"inspection" yaml:"inspection"`
++
+ 	DiskList []DiskList `mapstructure:"disk-list" json:"disk-list" yaml:"disk-list"`
+ 
+ 	// 跨域配置
+ 	Cors CORS `mapstructure:"cors" json:"cors" yaml:"cors"`
+ 
+ 	// MCP配置
+ 	MCP MCP `mapstructure:"mcp" json:"mcp" yaml:"mcp"`
+ 
+ 	// 应用身份（日志静态字段 node/app_id/env）
+ 	App App `mapstructure:"app" json:"app" yaml:"app"`
+diff --git a/server/config/inspection.go b/server/config/inspection.go
+new file mode 100644
+index 00000000..27a5d699
+--- /dev/null
++++ b/server/config/inspection.go
+@@ -0,0 +1,10 @@
++package config
++
++type Inspection struct {
++	KubeConfigDir string `mapstructure:"kube-config-dir" json:"kubeConfigDir" yaml:"kube-config-dir"`
++	ForceStub     bool   `mapstructure:"force-stub" json:"forceStub" yaml:"force-stub"`
++	WebhookURL    string `mapstructure:"webhook-url" json:"webhookUrl" yaml:"webhook-url"`
++	AIBaseURL     string `mapstructure:"ai-base-url" json:"aiBaseUrl" yaml:"ai-base-url"`
++	AIAPIKey      string `mapstructure:"ai-api-key" json:"aiApiKey" yaml:"ai-api-key"`
++	AIModel       string `mapstructure:"ai-model" json:"aiModel" yaml:"ai-model"`
++}
+diff --git a/server/initialize/ensure_tables.go b/server/initialize/ensure_tables.go
+index b46c2f93..2dfd9c8a 100644
+--- a/server/initialize/ensure_tables.go
++++ b/server/initialize/ensure_tables.go
+@@ -1,16 +1,17 @@
+ package initialize
+ 
+ import (
+ 	"context"
+ 	adapter "github.com/casbin/gorm-adapter/v3"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/model/example"
++	"github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/model/media"
+ 	sysModel "github.com/flipped-aurora/gin-vue-admin/server/model/system"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/plugin/announcement/model"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/service/system"
+ 	"gorm.io/gorm"
+ )
+ 
+ const initOrderEnsureTables = system.InitOrderExternal - 1
+ 
+ type ensureTables struct{}
+@@ -59,20 +60,29 @@ func (e *ensureTables) MigrateTable(ctx context.Context) (context.Context, error
+ 		sysModel.SysLoginLog{},
+ 		sysModel.SysApiToken{},
+ 		adapter.CasbinRule{},
+ 
+ 		example.ExaCustomer{},
+ 		media.MediaUpload{},
+ 		media.MediaUploadChunk{},
+ 		media.FileUploadAndDownload{},
+ 		media.AttachmentCategory{},
+ 
++		inspection.InspCluster{},
++		inspection.InspRule{},
++		inspection.InspTask{},
++		inspection.InspTaskRule{},
++		inspection.InspInspection{},
++		inspection.InspInspectionDetail{},
++		inspection.InspAlert{},
++		inspection.InspReport{},
++
+ 		model.Info{},
+ 	}
+ 	for _, t := range tables {
+ 		_ = db.AutoMigrate(&t)
+ 		// 视图 authority_menu 会被当成表来创建，引发冲突错误（更新版本的gorm似乎不会）
+ 		// 由于 AutoMigrate() 基本无需考虑错误，因此显式忽略
+ 	}
+ 	return ctx, nil
+ }
+ 
+@@ -100,18 +110,27 @@ func (e *ensureTables) TableCreated(ctx context.Context) bool {
+ 		sysModel.JoinTemplate{},
+ 
+ 		adapter.CasbinRule{},
+ 
+ 		example.ExaCustomer{},
+ 		media.MediaUpload{},
+ 		media.MediaUploadChunk{},
+ 		media.FileUploadAndDownload{},
+ 		media.AttachmentCategory{},
+ 
++		inspection.InspCluster{},
++		inspection.InspRule{},
++		inspection.InspTask{},
++		inspection.InspTaskRule{},
++		inspection.InspInspection{},
++		inspection.InspInspectionDetail{},
++		inspection.InspAlert{},
++		inspection.InspReport{},
++
+ 		model.Info{},
+ 	}
+ 	yes := true
+ 	for _, t := range tables {
+ 		yes = yes && db.Migrator().HasTable(t)
+ 	}
+ 	return yes
+ }
+diff --git a/server/initialize/gorm.go b/server/initialize/gorm.go
+index e0b332da..b4823f5e 100644
+--- a/server/initialize/gorm.go
++++ b/server/initialize/gorm.go
+@@ -1,17 +1,18 @@
+ package initialize
+ 
+ import (
+ 	"os"
+ 
+ 	"github.com/flipped-aurora/gin-vue-admin/server/global"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/model/example"
++	"github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/model/media"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/model/system"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/utils/logger"
+ 
+ 	"gorm.io/gorm"
+ )
+ 
+ func Gorm() *gorm.DB {
+ 	switch global.GVA_CONFIG.System.DbType {
+ 	case "mysql":
+@@ -72,20 +73,29 @@ func RegisterTables() {
+ 		system.SysApiToken{},
+ 		system.SysLoginLog{},
+ 		system.SysTimedTask{},
+ 		system.SysTimedTaskLog{},
+ 
+ 		example.ExaCustomer{},
+ 		media.MediaUpload{},
+ 		media.MediaUploadChunk{},
+ 		media.FileUploadAndDownload{},
+ 		media.AttachmentCategory{},
++
++		inspection.InspCluster{},
++		inspection.InspRule{},
++		inspection.InspTask{},
++		inspection.InspTaskRule{},
++		inspection.InspInspection{},
++		inspection.InspInspectionDetail{},
++		inspection.InspAlert{},
++		inspection.InspReport{},
+ 	)
+ 	if err != nil {
+ 		logger.Bg().Mod("system").Err(err).Error("register table failed")
+ 		os.Exit(1)
+ 	}
+ 
+ 	err = bizModel()
+ 
+ 	if err != nil {
+ 		logger.Bg().Mod("system").Err(err).Error("register biz_table failed")
+diff --git a/server/initialize/router.go b/server/initialize/router.go
+index 5525e184..e5530394 100644
+--- a/server/initialize/router.go
++++ b/server/initialize/router.go
+@@ -42,20 +42,21 @@ func Routers() *gin.Engine {
+ 	Router.Use(middleware.GinRecovery(true))
+ 	// 全局访问日志 + 唯一 body/resp 捕获点（供 OperationRecord 复用）
+ 	Router.Use(middleware.AccessLog())
+ 	if gin.Mode() == gin.DebugMode {
+ 		Router.Use(gin.Logger())
+ 	}
+ 
+ 	systemRouter := router.RouterGroupApp.System
+ 	exampleRouter := router.RouterGroupApp.Example
+ 	mediaRouter := router.RouterGroupApp.Media
++	inspectionRouter := router.RouterGroupApp.Inspection
+ 	// 如果想要不使用nginx代理前端网页，可以修改 web/.env.production 下的
+ 	// VUE_APP_BASE_API = /
+ 	// VUE_APP_BASE_PATH = http://localhost
+ 	// 然后执行打包命令 npm run build。在打开下面3行注释
+ 	// Router.StaticFile("/favicon.ico", "./dist/favicon.ico")
+ 	// Router.Static("/assets", "./dist/assets")   // dist里面的静态资源
+ 	// Router.StaticFile("/", "./dist/index.html") // 前端网页入口页面
+ 
+ 	Router.StaticFS(global.GVA_CONFIG.Local.StorePath, justFilesFilesystem{http.Dir(global.GVA_CONFIG.Local.StorePath)})
+ 	// Router.Use(middleware.LoadTls())  // 如果需要使用https 请打开此中间件 然后前往 core/server.go 将启动模式 更变为 Router.RunTLS("端口","你的cre/pem文件","你的key文件")
+@@ -103,20 +104,21 @@ func Routers() *gin.Engine {
+ 		systemRouter.InitSysParamsRouter(PrivateGroup, PublicGroup)         // 参数管理
+ 		systemRouter.InitSysErrorRouter(PrivateGroup, PublicGroup)          // 错误日志
+ 		systemRouter.InitLoginLogRouter(PrivateGroup)                       // 登录日志
+ 		systemRouter.InitSecurityConfigRouter(PrivateGroup)                 // 安全配置
+ 		systemRouter.InitApiTokenRouter(PrivateGroup)                       // apiToken签发
+ 		systemRouter.InitTimedTaskRouter(PrivateGroup)                      // 定时任务
+ 		exampleRouter.InitCustomerRouter(PrivateGroup)                      // 客户路由
+ 		mediaRouter.InitFileUploadAndDownloadRouter(PrivateGroup)           // 文件上传下载功能路由
+ 		mediaRouter.InitAttachmentCategoryRouterRouter(PrivateGroup)        // 媒体分类
+ 		mediaRouter.InitMediaUploadRouter(PrivateGroup)                     // 大文件上传
++		inspectionRouter.InitInspectionRouter(PrivateGroup)                 // K8s巡检占位路由
+ 	}
+ 
+ 	//插件路由安装
+ 	InstallPlugin(PrivateGroup, PublicGroup, Router)
+ 
+ 	// 注册业务路由
+ 	initBizRouter(PrivateGroup, PublicGroup)
+ 
+ 	global.GVA_ROUTERS = Router.Routes()
+ 
+diff --git a/server/model/inspection/alert.go b/server/model/inspection/alert.go
+new file mode 100644
+index 00000000..4c67032b
+--- /dev/null
++++ b/server/model/inspection/alert.go
+@@ -0,0 +1,19 @@
++package inspection
++
++import (
++	"time"
++
++	"github.com/flipped-aurora/gin-vue-admin/server/global"
++)
++
++type InspAlert struct {
++	global.GVA_MODEL
++	InspectionID uint      `json:"inspectionId" gorm:"comment:巡检ID"`
++	RuleType     string    `json:"ruleType" gorm:"size:64;comment:规则类型"`
++	Level        string    `json:"level" gorm:"size:16;default:warning;comment:级别"`
++	Status       string    `json:"status" gorm:"size:16;default:open;comment:状态open/acknowledged/closed"`
++	Content      string    `json:"content" gorm:"type:text;comment:内容"`
++	CollectedAt  time.Time `json:"collectedAt" gorm:"comment:采集时间"`
++}
++
++func (InspAlert) TableName() string { return "insp_alerts" }
+diff --git a/server/model/inspection/cluster.go b/server/model/inspection/cluster.go
+new file mode 100644
+index 00000000..e4de0afa
+--- /dev/null
++++ b/server/model/inspection/cluster.go
+@@ -0,0 +1,14 @@
++package inspection
++
++import "github.com/flipped-aurora/gin-vue-admin/server/global"
++
++type InspCluster struct {
++	global.GVA_MODEL
++	Name           string `json:"name" gorm:"size:128;comment:集群名"`
++	KubeconfigPath string `json:"-" gorm:"size:512;comment:kubeconfig路径"`
++	Status         string `json:"status" gorm:"size:32;default:unknown"`
++	K8sVersion     string `json:"k8sVersion" gorm:"size:64"`
++	NodeCount      int    `json:"nodeCount" gorm:"default:0"`
++}
++
++func (InspCluster) TableName() string { return "insp_clusters" }
+diff --git a/server/model/inspection/inspection.go b/server/model/inspection/inspection.go
+new file mode 100644
+index 00000000..3c4a10d7
+--- /dev/null
++++ b/server/model/inspection/inspection.go
+@@ -0,0 +1,34 @@
++package inspection
++
++import (
++	"time"
++
++	"github.com/flipped-aurora/gin-vue-admin/server/global"
++)
++
++type InspInspection struct {
++	global.GVA_MODEL
++	TaskID       uint       `json:"taskId" gorm:"comment:任务ID"`
++	Task         *InspTask  `json:"task,omitempty" gorm:"foreignKey:TaskID"`
++	Status       string     `json:"status" gorm:"size:16;default:running;comment:状态"`
++	AnomalyCount int        `json:"anomalyCount" gorm:"default:0;comment:异常数"`
++	Summary      string     `json:"summary" gorm:"type:text;comment:摘要"`
++	StartedAt    time.Time  `json:"startedAt" gorm:"comment:开始时间"`
++	FinishedAt   *time.Time `json:"finishedAt,omitempty" gorm:"comment:结束时间"`
++	Details      []InspInspectionDetail `json:"details,omitempty" gorm:"foreignKey:InspectionID"`
++}
++
++func (InspInspection) TableName() string { return "insp_inspections" }
++
++type InspInspectionDetail struct {
++	global.GVA_MODEL
++	InspectionID uint    `json:"inspectionId" gorm:"comment:巡检ID"`
++	RuleType     string  `json:"ruleType" gorm:"size:64;comment:规则类型"`
++	ResourceType string  `json:"resourceType" gorm:"size:64;comment:资源类型"`
++	ResourceName string  `json:"resourceName" gorm:"size:256;comment:资源名"`
++	Message      string  `json:"message" gorm:"type:text;comment:消息"`
++	IsAnomaly    bool    `json:"isAnomaly" gorm:"default:false;comment:是否异常"`
++	MetricValue  float64 `json:"metricValue" gorm:"comment:指标值"`
++}
++
++func (InspInspectionDetail) TableName() string { return "insp_inspection_details" }
+diff --git a/server/model/inspection/report.go b/server/model/inspection/report.go
+new file mode 100644
+index 00000000..6b25601b
+--- /dev/null
++++ b/server/model/inspection/report.go
+@@ -0,0 +1,14 @@
++package inspection
++
++import "github.com/flipped-aurora/gin-vue-admin/server/global"
++
++type InspReport struct {
++	global.GVA_MODEL
++	InspectionID uint   `json:"inspectionId" gorm:"comment:巡检ID"`
++	Title        string `json:"title" gorm:"size:256;comment:标题"`
++	ContentMD    string `json:"contentMd" gorm:"type:text;comment:Markdown内容"`
++	Digest       string `json:"digest" gorm:"size:512;comment:摘要"`
++	Source       string `json:"source" gorm:"size:16;default:template;comment:来源ai/template"`
++}
++
++func (InspReport) TableName() string { return "insp_reports" }
+diff --git a/server/model/inspection/request/inspection.go b/server/model/inspection/request/inspection.go
+new file mode 100644
+index 00000000..a3fe5a2e
+--- /dev/null
++++ b/server/model/inspection/request/inspection.go
+@@ -0,0 +1,88 @@
++package request
++
++import "github.com/flipped-aurora/gin-vue-admin/server/model/common/request"
++
++type ClusterSearch struct {
++	request.PageInfo
++	Name   string `json:"name" form:"name"`
++	Status string `json:"status" form:"status"`
++}
++
++type CreateCluster struct {
++	Name       string `json:"name" binding:"required"`
++	Kubeconfig string `json:"kubeconfig" binding:"required"`
++}
++
++type UpdateCluster struct {
++	Name       string `json:"name" binding:"required"`
++	Kubeconfig string `json:"kubeconfig"`
++}
++
++type RuleSearch struct {
++	request.PageInfo
++	Name     string `json:"name" form:"name"`
++	RuleType string `json:"ruleType" form:"ruleType"`
++	Enabled  *bool  `json:"enabled" form:"enabled"`
++}
++
++type CreateRule struct {
++	Name      string  `json:"name" binding:"required"`
++	RuleType  string  `json:"ruleType" binding:"required"`
++	Threshold float64 `json:"threshold"`
++	Scope     string  `json:"scope"`
++	Namespace string  `json:"namespace"`
++}
++
++type UpdateRule struct {
++	Name      string  `json:"name" binding:"required"`
++	RuleType  string  `json:"ruleType" binding:"required"`
++	Threshold float64 `json:"threshold"`
++	Scope     string  `json:"scope"`
++	Namespace string  `json:"namespace"`
++	Enabled   *bool   `json:"enabled"`
++}
++
++type TaskSearch struct {
++	request.PageInfo
++	Name      string `json:"name" form:"name"`
++	ClusterID uint   `json:"clusterId" form:"clusterId"`
++	Status    string `json:"status" form:"status"`
++}
++
++type CreateTask struct {
++	Name      string `json:"name" binding:"required"`
++	ClusterID uint   `json:"clusterId" binding:"required"`
++	CronExpr  string `json:"cronExpr"`
++	RuleIDs   []uint `json:"ruleIds" binding:"required"`
++}
++
++type UpdateTask struct {
++	Name      string `json:"name" binding:"required"`
++	ClusterID uint   `json:"clusterId" binding:"required"`
++	CronExpr  string `json:"cronExpr"`
++	RuleIDs   []uint `json:"ruleIds" binding:"required"`
++	Status    string `json:"status"`
++}
++
++type AlertSearch struct {
++	request.PageInfo
++	Status   string `json:"status" form:"status"`
++	Level    string `json:"level" form:"level"`
++	RuleType string `json:"ruleType" form:"ruleType"`
++}
++
++type PatchAlertStatus struct {
++	Status string `json:"status" binding:"required"`
++}
++
++type ReportSearch struct {
++	request.PageInfo
++	Title        string `json:"title" form:"title"`
++	InspectionID uint   `json:"inspectionId" form:"inspectionId"`
++}
++
++type InspectionSearch struct {
++	request.PageInfo
++	TaskID uint   `json:"taskId" form:"taskId"`
++	Status string `json:"status" form:"status"`
++}
+diff --git a/server/model/inspection/rule.go b/server/model/inspection/rule.go
+new file mode 100644
+index 00000000..8f584689
+--- /dev/null
++++ b/server/model/inspection/rule.go
+@@ -0,0 +1,15 @@
++package inspection
++
++import "github.com/flipped-aurora/gin-vue-admin/server/global"
++
++type InspRule struct {
++	global.GVA_MODEL
++	Name      string  `json:"name" gorm:"size:128;comment:规则名"`
++	RuleType  string  `json:"ruleType" gorm:"size:64;comment:规则类型"`
++	Threshold float64 `json:"threshold" gorm:"comment:阈值"`
++	Scope     string  `json:"scope" gorm:"size:64;default:cluster;comment:作用域cluster/namespace"`
++	Namespace string  `json:"namespace" gorm:"size:128;comment:命名空间"`
++	Enabled   bool    `json:"enabled" gorm:"default:true;comment:是否启用"`
++}
++
++func (InspRule) TableName() string { return "insp_rules" }
+diff --git a/server/model/inspection/table_name_test.go b/server/model/inspection/table_name_test.go
+new file mode 100644
+index 00000000..2598bb35
+--- /dev/null
++++ b/server/model/inspection/table_name_test.go
+@@ -0,0 +1,20 @@
++package inspection
++
++import "testing"
++
++func TestTableNames(t *testing.T) {
++	cases := map[string]string{
++		InspCluster{}.TableName():          "insp_clusters",
++		InspRule{}.TableName():             "insp_rules",
++		InspTask{}.TableName():             "insp_tasks",
++		InspInspection{}.TableName():       "insp_inspections",
++		InspInspectionDetail{}.TableName(): "insp_inspection_details",
++		InspAlert{}.TableName():            "insp_alerts",
++		InspReport{}.TableName():           "insp_reports",
++	}
++	for got, want := range cases {
++		if got != want {
++			t.Fatalf("got %q want %q", got, want)
++		}
++	}
++}
+diff --git a/server/model/inspection/task.go b/server/model/inspection/task.go
+new file mode 100644
+index 00000000..5428d904
+--- /dev/null
++++ b/server/model/inspection/task.go
+@@ -0,0 +1,24 @@
++package inspection
++
++import "github.com/flipped-aurora/gin-vue-admin/server/global"
++
++type InspTask struct {
++	global.GVA_MODEL
++	Name         string     `json:"name" gorm:"size:128;comment:任务名"`
++	ClusterID    uint       `json:"clusterId" gorm:"comment:集群ID"`
++	Cluster      *InspCluster `json:"cluster,omitempty" gorm:"foreignKey:ClusterID"`
++	ScheduleType string     `json:"scheduleType" gorm:"size:16;default:cron;comment:调度类型"`
++	CronExpr     string     `json:"cronExpr" gorm:"size:64;comment:cron表达式"`
++	Status       string     `json:"status" gorm:"size:16;default:active;comment:状态"`
++	TimedTaskID  *uint      `json:"timedTaskId" gorm:"comment:关联sys_timed_tasks"`
++	Rules        []InspRule `json:"rules,omitempty" gorm:"many2many:insp_task_rules;"`
++}
++
++func (InspTask) TableName() string { return "insp_tasks" }
++
++type InspTaskRule struct {
++	TaskID uint `gorm:"primaryKey;comment:任务ID"`
++	RuleID uint `gorm:"primaryKey;comment:规则ID"`
++}
++
++func (InspTaskRule) TableName() string { return "insp_task_rules" }
+diff --git a/server/router/enter.go b/server/router/enter.go
+index f32ecc14..405917a6 100644
+--- a/server/router/enter.go
++++ b/server/router/enter.go
+@@ -1,15 +1,17 @@
+ package router
+ 
+ import (
+ 	"github.com/flipped-aurora/gin-vue-admin/server/router/example"
++	"github.com/flipped-aurora/gin-vue-admin/server/router/inspection"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/router/media"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/router/system"
+ )
+ 
+ var RouterGroupApp = new(RouterGroup)
+ 
+ type RouterGroup struct {
+-	System  system.RouterGroup
+-	Example example.RouterGroup
+-	Media   media.RouterGroup
++	System     system.RouterGroup
++	Example    example.RouterGroup
++	Media      media.RouterGroup
++	Inspection inspection.RouterGroup
+ }
+diff --git a/server/router/inspection/enter.go b/server/router/inspection/enter.go
+new file mode 100644
+index 00000000..9e5cdb4a
+--- /dev/null
++++ b/server/router/inspection/enter.go
+@@ -0,0 +1,13 @@
++package inspection
++
++import (
++	api "github.com/flipped-aurora/gin-vue-admin/server/api/v1"
++)
++
++type RouterGroup struct {
++	InspectionRouter
++}
++
++var (
++	healthStubApi = api.ApiGroupApp.InspectionApiGroup.HealthStubApi
++)
+diff --git a/server/router/inspection/inspection.go b/server/router/inspection/inspection.go
+new file mode 100644
+index 00000000..80a37a81
+--- /dev/null
++++ b/server/router/inspection/inspection.go
+@@ -0,0 +1,12 @@
++package inspection
++
++import "github.com/gin-gonic/gin"
++
++type InspectionRouter struct{}
++
++func (r *InspectionRouter) InitInspectionRouter(Router *gin.RouterGroup) {
++	g := Router.Group("inspection")
++	{
++		g.GET("ping", healthStubApi.Ping)
++	}
++}
+diff --git a/server/service/enter.go b/server/service/enter.go
+index 58745b31..e669098d 100644
+--- a/server/service/enter.go
++++ b/server/service/enter.go
+@@ -1,15 +1,17 @@
+ package service
+ 
+ import (
+ 	"github.com/flipped-aurora/gin-vue-admin/server/service/example"
++	"github.com/flipped-aurora/gin-vue-admin/server/service/inspection"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/service/media"
+ 	"github.com/flipped-aurora/gin-vue-admin/server/service/system"
+ )
+ 
+ var ServiceGroupApp = new(ServiceGroup)
+ 
+ type ServiceGroup struct {
+-	SystemServiceGroup  system.ServiceGroup
+-	ExampleServiceGroup example.ServiceGroup
+-	MediaServiceGroup   media.ServiceGroup
++	SystemServiceGroup     system.ServiceGroup
++	ExampleServiceGroup    example.ServiceGroup
++	MediaServiceGroup      media.ServiceGroup
++	InspectionServiceGroup inspection.ServiceGroup
+ }
+diff --git a/server/service/inspection/enter.go b/server/service/inspection/enter.go
+new file mode 100644
+index 00000000..18930047
+--- /dev/null
++++ b/server/service/inspection/enter.go
+@@ -0,0 +1,7 @@
++package inspection
++
++type ClusterService struct{}
++
++type ServiceGroup struct {
++	ClusterService
++}

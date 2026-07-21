@@ -1,0 +1,1573 @@
+# Review Package
+BASE: f7eb0b292dcfdec9d050245fa3157452fdbb80cf
+HEAD: a2ba6bf9
+
+## Commits
+a2ba6bf9 feat(inspection): dashboard summary and real charts
+
+## Stat
+ server/api/v1/inspection/dashboard.go       |  80 +++++++++
+ server/api/v1/inspection/enter.go           |  12 +-
+ server/docs/docs.go                         | 243 ++++++++++++++++++++++++++++
+ server/docs/swagger.json                    | 243 ++++++++++++++++++++++++++++
+ server/docs/swagger.yaml                    | 140 ++++++++++++++++
+ server/router/inspection/dashboard.go       |  15 ++
+ server/router/inspection/enter.go           |   2 +
+ server/router/inspection/inspection.go      |   1 +
+ server/service/inspection/dashboard.go      | 166 +++++++++++++++++++
+ server/service/inspection/dashboard_test.go |  98 +++++++++++
+ server/service/inspection/enter.go          |   1 +
+ server/source/inspection/api.go             |   4 +
+ server/source/inspection/menu.go            |  16 +-
+ web/src/api/inspection.js                   |   9 ++
+ web/src/pathInfo.json                       |   1 +
+ web/src/view/inspection/dashboard.vue       | 165 +++++++++++++++++++
+ 16 files changed, 1185 insertions(+), 11 deletions(-)
+
+## Diff
+diff --git a/server/api/v1/inspection/dashboard.go b/server/api/v1/inspection/dashboard.go
+new file mode 100644
+index 00000000..6022ddee
+--- /dev/null
++++ b/server/api/v1/inspection/dashboard.go
+@@ -0,0 +1,80 @@
++package inspection
++
++import (
++	"github.com/flipped-aurora/gin-vue-admin/server/model/common/response"
++	"github.com/gin-gonic/gin"
++)
++
++type DashboardApi struct{}
++
++// Summary
++// @Tags      InspDashboard
++// @Summary   获取巡检总览统计
++// @Security  ApiKeyAuth
++// @Produce   application/json
++// @Success   200  {object}  response.Response{data=inspection.DashboardSummary,msg=string}  "统计数据"
++// @Router    /inspection/dashboard/summary [get]
++func (a *DashboardApi) Summary(c *gin.Context) {
++	summary, err := dashboardService.Summary(c.Request.Context())
++	if err != nil {
++		response.FailWithMessage("获取巡检总览失败", c)
++		return
++	}
++	response.OkWithData(summary, c)
++}
++
++// ResourceUsage
++// @Tags      InspDashboard
++// @Summary   获取最近巡检的集群资源使用率
++// @Security  ApiKeyAuth
++// @Produce   application/json
++// @Success   200  {object}  response.Response{data=[]inspection.DashboardResourceUsage,msg=string}  "资源使用率"
++// @Router    /inspection/dashboard/resourceUsage [get]
++func (a *DashboardApi) ResourceUsage(c *gin.Context) {
++	usage, err := dashboardService.ResourceUsage(c.Request.Context())
++	if err != nil {
++		response.FailWithMessage("获取资源使用率失败", c)
++		return
++	}
++	response.OkWithData(usage, c)
++}
++
++// InspectionTrend
++// @Tags      InspDashboard
++// @Summary   获取每日巡检异常趋势
++// @Security  ApiKeyAuth
++// @Produce   application/json
++// @Param     days  query     int  false  "统计天数，默认 7，最大 90"
++// @Success   200   {object}  response.Response{data=[]inspection.DashboardTrendItem,msg=string}  "异常趋势"
++// @Router    /inspection/dashboard/inspectionTrend [get]
++func (a *DashboardApi) InspectionTrend(c *gin.Context) {
++	var query struct {
++		Days int `form:"days"`
++	}
++	if err := c.ShouldBindQuery(&query); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	trend, err := dashboardService.InspectionTrend(c.Request.Context(), query.Days)
++	if err != nil {
++		response.FailWithMessage("获取巡检趋势失败", c)
++		return
++	}
++	response.OkWithData(trend, c)
++}
++
++// AlertDistribution
++// @Tags      InspDashboard
++// @Summary   获取巡检告警分布
++// @Security  ApiKeyAuth
++// @Produce   application/json
++// @Success   200  {object}  response.Response{data=inspection.DashboardAlertDistribution,msg=string}  "告警分布"
++// @Router    /inspection/dashboard/alertDistribution [get]
++func (a *DashboardApi) AlertDistribution(c *gin.Context) {
++	distribution, err := dashboardService.AlertDistribution(c.Request.Context())
++	if err != nil {
++		response.FailWithMessage("获取告警分布失败", c)
++		return
++	}
++	response.OkWithData(distribution, c)
++}
+diff --git a/server/api/v1/inspection/enter.go b/server/api/v1/inspection/enter.go
+index fc959379..0e897f22 100644
+--- a/server/api/v1/inspection/enter.go
++++ b/server/api/v1/inspection/enter.go
+@@ -4,19 +4,21 @@ import service "github.com/flipped-aurora/gin-vue-admin/server/service"
+ 
+ type HealthStubApi struct{}
+ 
+ type ApiGroup struct {
+ 	HealthStubApi
+ 	ClusterApi
+ 	RuleApi
+ 	TaskApi
+ 	AlertApi
+ 	ReportApi
++	DashboardApi
+ }
+ 
+ var (
+-	clusterService = service.ServiceGroupApp.InspectionServiceGroup.ClusterService
+-	ruleService    = service.ServiceGroupApp.InspectionServiceGroup.RuleService
+-	taskService    = service.ServiceGroupApp.InspectionServiceGroup.TaskService
+-	alertService   = service.ServiceGroupApp.InspectionServiceGroup.AlertService
+-	reportService  = service.ServiceGroupApp.InspectionServiceGroup.ReportService
++	clusterService   = service.ServiceGroupApp.InspectionServiceGroup.ClusterService
++	ruleService      = service.ServiceGroupApp.InspectionServiceGroup.RuleService
++	taskService      = service.ServiceGroupApp.InspectionServiceGroup.TaskService
++	alertService     = service.ServiceGroupApp.InspectionServiceGroup.AlertService
++	reportService    = service.ServiceGroupApp.InspectionServiceGroup.ReportService
++	dashboardService = service.ServiceGroupApp.InspectionServiceGroup.DashboardService
+ )
+diff --git a/server/docs/docs.go b/server/docs/docs.go
+index 4656f474..24489d09 100644
+--- a/server/docs/docs.go
++++ b/server/docs/docs.go
+@@ -6020,20 +6020,190 @@ const docTemplate = `{
+                                             "type": "string"
+                                         }
+                                     }
+                                 }
+                             ]
+                         }
+                     }
+                 }
+             }
+         },
++        "/inspection/dashboard/alertDistribution": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspDashboard"
++                ],
++                "summary": "获取巡检告警分布",
++                "responses": {
++                    "200": {
++                        "description": "告警分布",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "$ref": "#/definitions/inspection.DashboardAlertDistribution"
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/dashboard/inspectionTrend": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspDashboard"
++                ],
++                "summary": "获取每日巡检异常趋势",
++                "parameters": [
++                    {
++                        "type": "integer",
++                        "description": "统计天数，默认 7，最大 90",
++                        "name": "days",
++                        "in": "query"
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "异常趋势",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "type": "array",
++                                            "items": {
++                                                "$ref": "#/definitions/inspection.DashboardTrendItem"
++                                            }
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/dashboard/resourceUsage": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspDashboard"
++                ],
++                "summary": "获取最近巡检的集群资源使用率",
++                "responses": {
++                    "200": {
++                        "description": "资源使用率",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "type": "array",
++                                            "items": {
++                                                "$ref": "#/definitions/inspection.DashboardResourceUsage"
++                                            }
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/dashboard/summary": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspDashboard"
++                ],
++                "summary": "获取巡检总览统计",
++                "responses": {
++                    "200": {
++                        "description": "统计数据",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "$ref": "#/definitions/inspection.DashboardSummary"
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
+         "/inspection/ping": {
+             "get": {
+                 "security": [
+                     {
+                         "ApiKeyAuth": []
+                     }
+                 ],
+                 "produces": [
+                     "application/json"
+                 ],
+@@ -16210,20 +16380,93 @@ const docTemplate = `{
+                 "secret": {
+                     "description": "密钥    用于登录的密钥 最好不要用邮箱密码 去邮箱smtp申请一个用于登录的密钥",
+                     "type": "string"
+                 },
+                 "to": {
+                     "description": "收件人:多个以英文逗号分隔 例：a@qq.com b@qq.com 正式开发中请把此项目作为参数使用",
+                     "type": "string"
+                 }
+             }
+         },
++        "inspection.DashboardAlertDistribution": {
++            "type": "object",
++            "properties": {
++                "byCluster": {
++                    "type": "array",
++                    "items": {
++                        "$ref": "#/definitions/inspection.DashboardDistributionItem"
++                    }
++                },
++                "byLevel": {
++                    "type": "array",
++                    "items": {
++                        "$ref": "#/definitions/inspection.DashboardDistributionItem"
++                    }
++                }
++            }
++        },
++        "inspection.DashboardDistributionItem": {
++            "type": "object",
++            "properties": {
++                "count": {
++                    "type": "integer"
++                },
++                "name": {
++                    "type": "string"
++                }
++            }
++        },
++        "inspection.DashboardResourceUsage": {
++            "type": "object",
++            "properties": {
++                "clusterId": {
++                    "type": "integer"
++                },
++                "clusterName": {
++                    "type": "string"
++                },
++                "cpuUsage": {
++                    "type": "number"
++                },
++                "memoryUsage": {
++                    "type": "number"
++                }
++            }
++        },
++        "inspection.DashboardSummary": {
++            "type": "object",
++            "properties": {
++                "clusterCount": {
++                    "type": "integer"
++                },
++                "nodeCount": {
++                    "type": "integer"
++                },
++                "openAlertCount": {
++                    "type": "integer"
++                },
++                "todayInspectionCount": {
++                    "type": "integer"
++                }
++            }
++        },
++        "inspection.DashboardTrendItem": {
++            "type": "object",
++            "properties": {
++                "anomalyCount": {
++                    "type": "integer"
++                },
++                "date": {
++                    "type": "string"
++                }
++            }
++        },
+         "inspection.InspAlert": {
+             "type": "object",
+             "properties": {
+                 "ID": {
+                     "description": "主键ID",
+                     "type": "integer"
+                 },
+                 "collectedAt": {
+                     "type": "string"
+                 },
+diff --git a/server/docs/swagger.json b/server/docs/swagger.json
+index f9de6103..189176d5 100644
+--- a/server/docs/swagger.json
++++ b/server/docs/swagger.json
+@@ -6012,20 +6012,190 @@
+                                             "type": "string"
+                                         }
+                                     }
+                                 }
+                             ]
+                         }
+                     }
+                 }
+             }
+         },
++        "/inspection/dashboard/alertDistribution": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspDashboard"
++                ],
++                "summary": "获取巡检告警分布",
++                "responses": {
++                    "200": {
++                        "description": "告警分布",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "$ref": "#/definitions/inspection.DashboardAlertDistribution"
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/dashboard/inspectionTrend": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspDashboard"
++                ],
++                "summary": "获取每日巡检异常趋势",
++                "parameters": [
++                    {
++                        "type": "integer",
++                        "description": "统计天数，默认 7，最大 90",
++                        "name": "days",
++                        "in": "query"
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "异常趋势",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "type": "array",
++                                            "items": {
++                                                "$ref": "#/definitions/inspection.DashboardTrendItem"
++                                            }
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/dashboard/resourceUsage": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspDashboard"
++                ],
++                "summary": "获取最近巡检的集群资源使用率",
++                "responses": {
++                    "200": {
++                        "description": "资源使用率",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "type": "array",
++                                            "items": {
++                                                "$ref": "#/definitions/inspection.DashboardResourceUsage"
++                                            }
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/dashboard/summary": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspDashboard"
++                ],
++                "summary": "获取巡检总览统计",
++                "responses": {
++                    "200": {
++                        "description": "统计数据",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "$ref": "#/definitions/inspection.DashboardSummary"
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
+         "/inspection/ping": {
+             "get": {
+                 "security": [
+                     {
+                         "ApiKeyAuth": []
+                     }
+                 ],
+                 "produces": [
+                     "application/json"
+                 ],
+@@ -16202,20 +16372,93 @@
+                 "secret": {
+                     "description": "密钥    用于登录的密钥 最好不要用邮箱密码 去邮箱smtp申请一个用于登录的密钥",
+                     "type": "string"
+                 },
+                 "to": {
+                     "description": "收件人:多个以英文逗号分隔 例：a@qq.com b@qq.com 正式开发中请把此项目作为参数使用",
+                     "type": "string"
+                 }
+             }
+         },
++        "inspection.DashboardAlertDistribution": {
++            "type": "object",
++            "properties": {
++                "byCluster": {
++                    "type": "array",
++                    "items": {
++                        "$ref": "#/definitions/inspection.DashboardDistributionItem"
++                    }
++                },
++                "byLevel": {
++                    "type": "array",
++                    "items": {
++                        "$ref": "#/definitions/inspection.DashboardDistributionItem"
++                    }
++                }
++            }
++        },
++        "inspection.DashboardDistributionItem": {
++            "type": "object",
++            "properties": {
++                "count": {
++                    "type": "integer"
++                },
++                "name": {
++                    "type": "string"
++                }
++            }
++        },
++        "inspection.DashboardResourceUsage": {
++            "type": "object",
++            "properties": {
++                "clusterId": {
++                    "type": "integer"
++                },
++                "clusterName": {
++                    "type": "string"
++                },
++                "cpuUsage": {
++                    "type": "number"
++                },
++                "memoryUsage": {
++                    "type": "number"
++                }
++            }
++        },
++        "inspection.DashboardSummary": {
++            "type": "object",
++            "properties": {
++                "clusterCount": {
++                    "type": "integer"
++                },
++                "nodeCount": {
++                    "type": "integer"
++                },
++                "openAlertCount": {
++                    "type": "integer"
++                },
++                "todayInspectionCount": {
++                    "type": "integer"
++                }
++            }
++        },
++        "inspection.DashboardTrendItem": {
++            "type": "object",
++            "properties": {
++                "anomalyCount": {
++                    "type": "integer"
++                },
++                "date": {
++                    "type": "string"
++                }
++            }
++        },
+         "inspection.InspAlert": {
+             "type": "object",
+             "properties": {
+                 "ID": {
+                     "description": "主键ID",
+                     "type": "integer"
+                 },
+                 "collectedAt": {
+                     "type": "string"
+                 },
+diff --git a/server/docs/swagger.yaml b/server/docs/swagger.yaml
+index 163e04b1..a536e268 100644
+--- a/server/docs/swagger.yaml
++++ b/server/docs/swagger.yaml
+@@ -849,20 +849,67 @@ definitions:
+       port:
+         description: 端口     请前往QQ或者你要发邮件的邮箱查看其smtp协议 大多为 465
+         type: integer
+       secret:
+         description: 密钥    用于登录的密钥 最好不要用邮箱密码 去邮箱smtp申请一个用于登录的密钥
+         type: string
+       to:
+         description: 收件人:多个以英文逗号分隔 例：a@qq.com b@qq.com 正式开发中请把此项目作为参数使用
+         type: string
+     type: object
++  inspection.DashboardAlertDistribution:
++    properties:
++      byCluster:
++        items:
++          $ref: '#/definitions/inspection.DashboardDistributionItem'
++        type: array
++      byLevel:
++        items:
++          $ref: '#/definitions/inspection.DashboardDistributionItem'
++        type: array
++    type: object
++  inspection.DashboardDistributionItem:
++    properties:
++      count:
++        type: integer
++      name:
++        type: string
++    type: object
++  inspection.DashboardResourceUsage:
++    properties:
++      clusterId:
++        type: integer
++      clusterName:
++        type: string
++      cpuUsage:
++        type: number
++      memoryUsage:
++        type: number
++    type: object
++  inspection.DashboardSummary:
++    properties:
++      clusterCount:
++        type: integer
++      nodeCount:
++        type: integer
++      openAlertCount:
++        type: integer
++      todayInspectionCount:
++        type: integer
++    type: object
++  inspection.DashboardTrendItem:
++    properties:
++      anomalyCount:
++        type: integer
++      date:
++        type: string
++    type: object
+   inspection.InspAlert:
+     properties:
+       ID:
+         description: 主键ID
+         type: integer
+       collectedAt:
+         type: string
+       content:
+         type: string
+       createdAt:
+@@ -6926,20 +6973,113 @@ paths:
+                 data:
+                   $ref: '#/definitions/inspection.InspCluster'
+                 msg:
+                   type: string
+               type: object
+       security:
+       - ApiKeyAuth: []
+       summary: 刷新巡检集群状态
+       tags:
+       - InspCluster
++  /inspection/dashboard/alertDistribution:
++    get:
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 告警分布
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                data:
++                  $ref: '#/definitions/inspection.DashboardAlertDistribution'
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 获取巡检告警分布
++      tags:
++      - InspDashboard
++  /inspection/dashboard/inspectionTrend:
++    get:
++      parameters:
++      - description: 统计天数，默认 7，最大 90
++        in: query
++        name: days
++        type: integer
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 异常趋势
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                data:
++                  items:
++                    $ref: '#/definitions/inspection.DashboardTrendItem'
++                  type: array
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 获取每日巡检异常趋势
++      tags:
++      - InspDashboard
++  /inspection/dashboard/resourceUsage:
++    get:
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 资源使用率
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                data:
++                  items:
++                    $ref: '#/definitions/inspection.DashboardResourceUsage'
++                  type: array
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 获取最近巡检的集群资源使用率
++      tags:
++      - InspDashboard
++  /inspection/dashboard/summary:
++    get:
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 统计数据
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                data:
++                  $ref: '#/definitions/inspection.DashboardSummary'
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 获取巡检总览统计
++      tags:
++      - InspDashboard
+   /inspection/ping:
+     get:
+       produces:
+       - application/json
+       responses:
+         "200":
+           description: pong
+           schema:
+             allOf:
+             - $ref: '#/definitions/response.Response'
+diff --git a/server/router/inspection/dashboard.go b/server/router/inspection/dashboard.go
+new file mode 100644
+index 00000000..9523892b
+--- /dev/null
++++ b/server/router/inspection/dashboard.go
+@@ -0,0 +1,15 @@
++package inspection
++
++import "github.com/gin-gonic/gin"
++
++type DashboardRouter struct{}
++
++func (r *DashboardRouter) InitDashboardRouter(router *gin.RouterGroup) {
++	read := router.Group("inspection/dashboard")
++	{
++		read.GET("summary", dashboardApi.Summary)
++		read.GET("resourceUsage", dashboardApi.ResourceUsage)
++		read.GET("inspectionTrend", dashboardApi.InspectionTrend)
++		read.GET("alertDistribution", dashboardApi.AlertDistribution)
++	}
++}
+diff --git a/server/router/inspection/enter.go b/server/router/inspection/enter.go
+index cc706d65..c2db10f8 100644
+--- a/server/router/inspection/enter.go
++++ b/server/router/inspection/enter.go
+@@ -4,20 +4,22 @@ import (
+ 	api "github.com/flipped-aurora/gin-vue-admin/server/api/v1"
+ )
+ 
+ type RouterGroup struct {
+ 	InspectionRouter
+ 	ClusterRouter
+ 	RuleRouter
+ 	TaskRouter
+ 	AlertRouter
+ 	ReportRouter
++	DashboardRouter
+ }
+ 
+ var (
+ 	healthStubApi = api.ApiGroupApp.InspectionApiGroup.HealthStubApi
+ 	clusterApi    = api.ApiGroupApp.InspectionApiGroup.ClusterApi
+ 	ruleApi       = api.ApiGroupApp.InspectionApiGroup.RuleApi
+ 	taskApi       = api.ApiGroupApp.InspectionApiGroup.TaskApi
+ 	alertApi      = api.ApiGroupApp.InspectionApiGroup.AlertApi
+ 	reportApi     = api.ApiGroupApp.InspectionApiGroup.ReportApi
++	dashboardApi  = api.ApiGroupApp.InspectionApiGroup.DashboardApi
+ )
+diff --git a/server/router/inspection/inspection.go b/server/router/inspection/inspection.go
+index cdf81d4e..eea9c0cc 100644
+--- a/server/router/inspection/inspection.go
++++ b/server/router/inspection/inspection.go
+@@ -2,16 +2,17 @@ package inspection
+ 
+ import "github.com/gin-gonic/gin"
+ 
+ type InspectionRouter struct{}
+ 
+ func (r *InspectionRouter) InitInspectionRouter(Router *gin.RouterGroup) {
+ 	g := Router.Group("inspection")
+ 	{
+ 		g.GET("ping", healthStubApi.Ping)
+ 	}
++	(&DashboardRouter{}).InitDashboardRouter(Router)
+ 	(&ClusterRouter{}).InitClusterRouter(Router)
+ 	(&RuleRouter{}).InitRuleRouter(Router)
+ 	(&TaskRouter{}).InitTaskRouter(Router)
+ 	(&AlertRouter{}).InitAlertRouter(Router)
+ 	(&ReportRouter{}).InitReportRouter(Router)
+ }
+diff --git a/server/service/inspection/dashboard.go b/server/service/inspection/dashboard.go
+new file mode 100644
+index 00000000..ff04f305
+--- /dev/null
++++ b/server/service/inspection/dashboard.go
+@@ -0,0 +1,166 @@
++package inspection
++
++import (
++	"context"
++	"sort"
++	"time"
++
++	"github.com/flipped-aurora/gin-vue-admin/server/global"
++	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
++)
++
++type DashboardService struct{}
++
++type DashboardSummary struct {
++	ClusterCount         int64 `json:"clusterCount"`
++	NodeCount            int64 `json:"nodeCount"`
++	TodayInspectionCount int64 `json:"todayInspectionCount"`
++	OpenAlertCount       int64 `json:"openAlertCount"`
++}
++
++type DashboardResourceUsage struct {
++	ClusterID   uint    `json:"clusterId"`
++	ClusterName string  `json:"clusterName"`
++	CPUUsage    float64 `json:"cpuUsage"`
++	MemoryUsage float64 `json:"memoryUsage"`
++}
++
++type DashboardTrendItem struct {
++	Date         string `json:"date"`
++	AnomalyCount int    `json:"anomalyCount"`
++}
++
++type DashboardDistributionItem struct {
++	Name  string `json:"name"`
++	Count int64  `json:"count"`
++}
++
++type DashboardAlertDistribution struct {
++	ByLevel   []DashboardDistributionItem `json:"byLevel"`
++	ByCluster []DashboardDistributionItem `json:"byCluster"`
++}
++
++func (s *DashboardService) Summary(ctx context.Context) (DashboardSummary, error) {
++	db := global.GVA_DB.WithContext(ctx)
++	summary := DashboardSummary{}
++	if err := db.Model(&inspModel.InspCluster{}).Count(&summary.ClusterCount).Error; err != nil {
++		return summary, err
++	}
++	if err := db.Model(&inspModel.InspCluster{}).Select("COALESCE(SUM(node_count), 0)").Scan(&summary.NodeCount).Error; err != nil {
++		return summary, err
++	}
++	dayStart := time.Now().Truncate(24 * time.Hour)
++	if err := db.Model(&inspModel.InspInspection{}).Where("started_at >= ?", dayStart).Count(&summary.TodayInspectionCount).Error; err != nil {
++		return summary, err
++	}
++	if err := db.Model(&inspModel.InspAlert{}).Where("status = ?", "open").Count(&summary.OpenAlertCount).Error; err != nil {
++		return summary, err
++	}
++	return summary, nil
++}
++
++func (s *DashboardService) ResourceUsage(ctx context.Context) ([]DashboardResourceUsage, error) {
++	var inspections []inspModel.InspInspection
++	if err := global.GVA_DB.WithContext(ctx).
++		Preload("Task.Cluster").
++		Where("status = ?", "success").
++		Order("started_at DESC").
++		Find(&inspections).Error; err != nil {
++		return nil, err
++	}
++
++	result := make([]DashboardResourceUsage, 0)
++	seenClusters := make(map[uint]struct{})
++	for _, inspection := range inspections {
++		if inspection.Task == nil || inspection.Task.Cluster == nil {
++			continue
++		}
++		cluster := inspection.Task.Cluster
++		if _, seen := seenClusters[cluster.ID]; seen {
++			continue
++		}
++		seenClusters[cluster.ID] = struct{}{}
++		var metrics []inspModel.InspInspectionDetail
++		if err := global.GVA_DB.WithContext(ctx).
++			Where("inspection_id = ? AND rule_type IN ?", inspection.ID, []string{"node_cpu", "cpu_high", "node_memory", "mem_high"}).
++			Find(&metrics).Error; err != nil {
++			return nil, err
++		}
++		cpu, memory, cpuCount, memoryCount := 0.0, 0.0, 0, 0
++		for _, metric := range metrics {
++			switch normalizeRuleType(metric.RuleType) {
++			case "node_cpu":
++				cpu += metric.MetricValue
++				cpuCount++
++			case "node_memory":
++				memory += metric.MetricValue
++				memoryCount++
++			}
++		}
++		if cpuCount == 0 && memoryCount == 0 {
++			continue
++		}
++		if cpuCount > 0 {
++			cpu /= float64(cpuCount)
++		}
++		if memoryCount > 0 {
++			memory /= float64(memoryCount)
++		}
++		result = append(result, DashboardResourceUsage{ClusterID: cluster.ID, ClusterName: cluster.Name, CPUUsage: cpu, MemoryUsage: memory})
++	}
++	sort.Slice(result, func(i, j int) bool { return result[i].ClusterName < result[j].ClusterName })
++	return result, nil
++}
++
++func (s *DashboardService) InspectionTrend(ctx context.Context, days int) ([]DashboardTrendItem, error) {
++	if days <= 0 {
++		days = 7
++	}
++	if days > 90 {
++		days = 90
++	}
++	today := time.Now().Truncate(24 * time.Hour)
++	start := today.AddDate(0, 0, -(days - 1))
++	var inspections []inspModel.InspInspection
++	if err := global.GVA_DB.WithContext(ctx).
++		Where("started_at >= ? AND started_at < ?", start, today.AddDate(0, 0, 1)).
++		Find(&inspections).Error; err != nil {
++		return nil, err
++	}
++	counts := make(map[string]int)
++	for _, inspection := range inspections {
++		counts[inspection.StartedAt.Format("2006-01-02")] += inspection.AnomalyCount
++	}
++	result := make([]DashboardTrendItem, 0, days)
++	for offset := 0; offset < days; offset++ {
++		date := start.AddDate(0, 0, offset).Format("2006-01-02")
++		result = append(result, DashboardTrendItem{Date: date, AnomalyCount: counts[date]})
++	}
++	return result, nil
++}
++
++func (s *DashboardService) AlertDistribution(ctx context.Context) (DashboardAlertDistribution, error) {
++	db := global.GVA_DB.WithContext(ctx)
++	result := DashboardAlertDistribution{
++		ByLevel:   make([]DashboardDistributionItem, 0),
++		ByCluster: make([]DashboardDistributionItem, 0),
++	}
++	if err := db.Model(&inspModel.InspAlert{}).
++		Select("level AS name, COUNT(*) AS count").
++		Group("level").
++		Order("level ASC").
++		Scan(&result.ByLevel).Error; err != nil {
++		return result, err
++	}
++	if err := db.Model(&inspModel.InspAlert{}).
++		Select("insp_clusters.name AS name, COUNT(insp_alerts.id) AS count").
++		Joins("JOIN insp_inspections ON insp_inspections.id = insp_alerts.inspection_id").
++		Joins("JOIN insp_tasks ON insp_tasks.id = insp_inspections.task_id").
++		Joins("JOIN insp_clusters ON insp_clusters.id = insp_tasks.cluster_id").
++		Group("insp_clusters.id, insp_clusters.name").
++		Order("insp_clusters.name ASC").
++		Scan(&result.ByCluster).Error; err != nil {
++		return result, err
++	}
++	return result, nil
++}
+diff --git a/server/service/inspection/dashboard_test.go b/server/service/inspection/dashboard_test.go
+new file mode 100644
+index 00000000..d5ee4448
+--- /dev/null
++++ b/server/service/inspection/dashboard_test.go
+@@ -0,0 +1,98 @@
++package inspection
++
++import (
++	"context"
++	"testing"
++	"time"
++
++	"github.com/flipped-aurora/gin-vue-admin/server/global"
++	"github.com/flipped-aurora/gin-vue-admin/server/internal/testutil"
++	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
++)
++
++func TestDashboardServiceReturnsSeededMetrics(t *testing.T) {
++	now := time.Now()
++	testutil.NewMemoryDB(t,
++		&inspModel.InspCluster{},
++		&inspModel.InspTask{},
++		&inspModel.InspInspection{},
++		&inspModel.InspInspectionDetail{},
++		&inspModel.InspAlert{},
++	)
++	seedDashboardData(t, now)
++
++	service := DashboardService{}
++	summary, err := service.Summary(context.Background())
++	if err != nil {
++		t.Fatalf("summary: %v", err)
++	}
++	if summary.ClusterCount != 2 || summary.NodeCount != 5 || summary.TodayInspectionCount != 1 || summary.OpenAlertCount != 1 {
++		t.Fatalf("summary = %#v", summary)
++	}
++
++	usage, err := service.ResourceUsage(context.Background())
++	if err != nil {
++		t.Fatalf("resource usage: %v", err)
++	}
++	if len(usage) != 1 || usage[0].ClusterName != "生产集群" || usage[0].CPUUsage != 70 || usage[0].MemoryUsage != 60 {
++		t.Fatalf("resource usage = %#v", usage)
++	}
++
++	trend, err := service.InspectionTrend(context.Background(), 3)
++	if err != nil {
++		t.Fatalf("inspection trend: %v", err)
++	}
++	if len(trend) != 3 || trend[2].AnomalyCount != 3 || trend[1].AnomalyCount != 2 || trend[0].AnomalyCount != 0 {
++		t.Fatalf("inspection trend = %#v", trend)
++	}
++
++	distribution, err := service.AlertDistribution(context.Background())
++	if err != nil {
++		t.Fatalf("alert distribution: %v", err)
++	}
++	if len(distribution.ByLevel) != 2 || distribution.ByLevel[0].Name != "critical" || distribution.ByLevel[0].Count != 1 {
++		t.Fatalf("alert level distribution = %#v", distribution.ByLevel)
++	}
++	if len(distribution.ByCluster) != 1 || distribution.ByCluster[0].Name != "生产集群" || distribution.ByCluster[0].Count != 2 {
++		t.Fatalf("alert cluster distribution = %#v", distribution.ByCluster)
++	}
++}
++
++func seedDashboardData(t *testing.T, now time.Time) {
++	t.Helper()
++	cluster := inspModel.InspCluster{Name: "生产集群", NodeCount: 3}
++	emptyCluster := inspModel.InspCluster{Name: "测试集群", NodeCount: 2}
++	for _, item := range []*inspModel.InspCluster{&cluster, &emptyCluster} {
++		if err := global.GVA_DB.Create(item).Error; err != nil {
++			t.Fatalf("create cluster: %v", err)
++		}
++	}
++	task := inspModel.InspTask{Name: "生产巡检", ClusterID: cluster.ID}
++	if err := global.GVA_DB.Create(&task).Error; err != nil {
++		t.Fatalf("create task: %v", err)
++	}
++	inspection := inspModel.InspInspection{TaskID: task.ID, Status: "success", AnomalyCount: 3, StartedAt: now, FinishedAt: &now}
++	previous := inspModel.InspInspection{TaskID: task.ID, Status: "success", AnomalyCount: 2, StartedAt: now.AddDate(0, 0, -1)}
++	if err := global.GVA_DB.Create(&inspection).Error; err != nil {
++		t.Fatalf("create inspection: %v", err)
++	}
++	if err := global.GVA_DB.Create(&previous).Error; err != nil {
++		t.Fatalf("create previous inspection: %v", err)
++	}
++	details := []inspModel.InspInspectionDetail{
++		{InspectionID: inspection.ID, RuleType: "node_cpu", MetricValue: 60},
++		{InspectionID: inspection.ID, RuleType: "node_cpu", MetricValue: 80},
++		{InspectionID: inspection.ID, RuleType: "node_memory", MetricValue: 50},
++		{InspectionID: inspection.ID, RuleType: "node_memory", MetricValue: 70},
++	}
++	if err := global.GVA_DB.Create(&details).Error; err != nil {
++		t.Fatalf("create details: %v", err)
++	}
++	alerts := []inspModel.InspAlert{
++		{InspectionID: inspection.ID, Level: "critical", Status: "open", CollectedAt: now},
++		{InspectionID: inspection.ID, Level: "warning", Status: "closed", CollectedAt: now},
++	}
++	if err := global.GVA_DB.Create(&alerts).Error; err != nil {
++		t.Fatalf("create alerts: %v", err)
++	}
++}
+diff --git a/server/service/inspection/enter.go b/server/service/inspection/enter.go
+index 1a8a1996..6de4d570 100644
+--- a/server/service/inspection/enter.go
++++ b/server/service/inspection/enter.go
+@@ -1,9 +1,10 @@
+ package inspection
+ 
+ type ServiceGroup struct {
+ 	ClusterService
+ 	RuleService
+ 	TaskService
+ 	AlertService
+ 	ReportService
++	DashboardService
+ }
+diff --git a/server/source/inspection/api.go b/server/source/inspection/api.go
+index 77939e4c..d280b69a 100644
+--- a/server/source/inspection/api.go
++++ b/server/source/inspection/api.go
+@@ -50,20 +50,24 @@ func (i *initAPI) DataInserted(ctx context.Context) bool {
+ 	db, ok := ctx.Value("db").(*gorm.DB)
+ 	if !ok {
+ 		return false
+ 	}
+ 	var count int64
+ 	return db.Model(&sysModel.SysApi{}).Where("api_group = ?", "K8s巡检").Count(&count).Error == nil && count == int64(len(inspectionAPIs()))
+ }
+ 
+ func inspectionAPIs() []sysModel.SysApi {
+ 	return []sysModel.SysApi{
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/dashboard/summary", Description: "获取巡检总览统计"},
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/dashboard/resourceUsage", Description: "获取集群资源使用率"},
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/dashboard/inspectionTrend", Description: "获取巡检异常趋势"},
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/dashboard/alertDistribution", Description: "获取巡检告警分布"},
+ 		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/cluster", Description: "创建巡检集群"},
+ 		{ApiGroup: "K8s巡检", Method: "PUT", Path: "/inspection/cluster", Description: "更新巡检集群"},
+ 		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/cluster", Description: "删除巡检集群"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/cluster", Description: "获取巡检集群"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/cluster/list", Description: "获取巡检集群列表"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/cluster/nodes", Description: "获取集群节点"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/cluster/namespaces", Description: "获取集群命名空间"},
+ 		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/cluster/refresh", Description: "刷新集群状态"},
+ 		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/rule", Description: "创建巡检规则"},
+ 		{ApiGroup: "K8s巡检", Method: "PUT", Path: "/inspection/rule", Description: "更新巡检规则"},
+diff --git a/server/source/inspection/menu.go b/server/source/inspection/menu.go
+index d298ba4a..fe38ec24 100644
+--- a/server/source/inspection/menu.go
++++ b/server/source/inspection/menu.go
+@@ -38,39 +38,43 @@ func (i *initMenu) InitializeData(ctx context.Context) (context.Context, error)
+ 		return ctx, system.ErrMissingDBContext
+ 	}
+ 	parent := sysModel.SysBaseMenu{
+ 		MenuLevel: 0, Path: "inspection", Name: "inspection", Component: "view/routerHolder.vue", Sort: 9,
+ 		Meta: sysModel.Meta{Title: "K8s 巡检", Icon: "monitor-gva"},
+ 	}
+ 	if err := db.Where("name = ?", parent.Name).FirstOrCreate(&parent).Error; err != nil {
+ 		return ctx, errors.Wrap(err, "初始化巡检父菜单失败")
+ 	}
+ 	children := []sysModel.SysBaseMenu{
+-		{MenuLevel: 1, ParentId: parent.ID, Path: "cluster", Name: "inspectionCluster", Component: "view/inspection/cluster.vue", Sort: 1, Meta: sysModel.Meta{Title: "集群管理", Icon: "connection"}},
+-		{MenuLevel: 1, ParentId: parent.ID, Path: "rule", Name: "inspectionRule", Component: "view/inspection/rule.vue", Sort: 2, Meta: sysModel.Meta{Title: "巡检规则", Icon: "set-up"}},
+-		{MenuLevel: 1, ParentId: parent.ID, Path: "task", Name: "inspectionTask", Component: "view/inspection/task.vue", Sort: 3, Meta: sysModel.Meta{Title: "巡检任务", Icon: "calendar"}},
+-		{MenuLevel: 1, ParentId: parent.ID, Path: "alert", Name: "inspectionAlert", Component: "view/inspection/alert.vue", Sort: 4, Meta: sysModel.Meta{Title: "巡检告警", Icon: "warning"}},
+-		{MenuLevel: 1, ParentId: parent.ID, Path: "report", Name: "inspectionReport", Component: "view/inspection/report.vue", Sort: 5, Meta: sysModel.Meta{Title: "巡检报告", Icon: "document"}},
++		{MenuLevel: 1, ParentId: parent.ID, Path: "dashboard", Name: "inspectionDashboard", Component: "view/inspection/dashboard.vue", Sort: 1, Meta: sysModel.Meta{Title: "巡检总览", Icon: "monitor-gva"}},
++		{MenuLevel: 1, ParentId: parent.ID, Path: "cluster", Name: "inspectionCluster", Component: "view/inspection/cluster.vue", Sort: 2, Meta: sysModel.Meta{Title: "集群管理", Icon: "connection"}},
++		{MenuLevel: 1, ParentId: parent.ID, Path: "rule", Name: "inspectionRule", Component: "view/inspection/rule.vue", Sort: 3, Meta: sysModel.Meta{Title: "巡检规则", Icon: "set-up"}},
++		{MenuLevel: 1, ParentId: parent.ID, Path: "task", Name: "inspectionTask", Component: "view/inspection/task.vue", Sort: 4, Meta: sysModel.Meta{Title: "巡检任务", Icon: "calendar"}},
++		{MenuLevel: 1, ParentId: parent.ID, Path: "alert", Name: "inspectionAlert", Component: "view/inspection/alert.vue", Sort: 5, Meta: sysModel.Meta{Title: "巡检告警", Icon: "warning"}},
++		{MenuLevel: 1, ParentId: parent.ID, Path: "report", Name: "inspectionReport", Component: "view/inspection/report.vue", Sort: 6, Meta: sysModel.Meta{Title: "巡检报告", Icon: "document"}},
+ 	}
+ 	for _, menu := range children {
+ 		if err := db.Where("name = ?", menu.Name).FirstOrCreate(&menu).Error; err != nil {
+ 			return ctx, errors.Wrap(err, "初始化巡检子菜单失败")
+ 		}
++		if err := db.Model(&sysModel.SysBaseMenu{}).Where("name = ?", menu.Name).Update("sort", menu.Sort).Error; err != nil {
++			return ctx, errors.Wrap(err, "更新巡检子菜单排序失败")
++		}
+ 	}
+ 	var admin sysModel.SysAuthority
+ 	if err := db.Where("authority_id = ?", 888).First(&admin).Error; err != nil {
+ 		return ctx, errors.Wrap(err, "查询超级管理员失败")
+ 	}
+ 	menus := append([]sysModel.SysBaseMenu{parent}, children...)
+ 	if err := db.Model(&admin).Association("SysBaseMenus").Append(menus); err != nil {
+ 		return ctx, errors.Wrap(err, "授予巡检菜单权限失败")
+ 	}
+ 	return ctx, nil
+ }
+ 
+ func (i *initMenu) DataInserted(ctx context.Context) bool {
+ 	db, ok := ctx.Value("db").(*gorm.DB)
+ 	if !ok {
+ 		return false
+ 	}
+-	return db.Where("name = ?", "inspectionReport").First(&sysModel.SysBaseMenu{}).Error == nil
++	return db.Where("name = ?", "inspectionDashboard").First(&sysModel.SysBaseMenu{}).Error == nil
+ }
+diff --git a/web/src/api/inspection.js b/web/src/api/inspection.js
+index 8adf8a43..0f3f9cb4 100644
+--- a/web/src/api/inspection.js
++++ b/web/src/api/inspection.js
+@@ -52,10 +52,19 @@ export const batchDeleteAlerts = (data) =>
+ export const getReportList = (params) =>
+   request('/inspection/report/list', 'get', undefined, params)
+ export const getReport = (params) =>
+   request('/inspection/report', 'get', undefined, params)
+ export const generateReport = (data) =>
+   request('/inspection/report/generate', 'post', data)
+ export const pushReport = (data) =>
+   request('/inspection/report/push', 'post', data)
+ export const deleteReport = (data) =>
+   request('/inspection/report', 'delete', data)
++
++export const getDashboardSummary = () =>
++  request('/inspection/dashboard/summary', 'get')
++export const getDashboardResourceUsage = () =>
++  request('/inspection/dashboard/resourceUsage', 'get')
++export const getDashboardInspectionTrend = (params) =>
++  request('/inspection/dashboard/inspectionTrend', 'get', undefined, params)
++export const getDashboardAlertDistribution = () =>
++  request('/inspection/dashboard/alertDistribution', 'get')
+diff --git a/web/src/pathInfo.json b/web/src/pathInfo.json
+index 90384096..f6c0b202 100644
+--- a/web/src/pathInfo.json
++++ b/web/src/pathInfo.json
+@@ -11,20 +11,21 @@
+   "/src/view/dashboard/components/table.vue": "Table",
+   "/src/view/dashboard/components/wiki.vue": "Wiki",
+   "/src/view/dashboard/index.vue": "Dashboard",
+   "/src/view/error/index.vue": "Error",
+   "/src/view/error/reload.vue": "Reload",
+   "/src/view/example/customer/customer.vue": "Customer",
+   "/src/view/example/index.vue": "Example",
+   "/src/view/init/index.vue": "Init",
+   "/src/view/inspection/alert.vue": "InspectionAlert",
+   "/src/view/inspection/cluster.vue": "InspectionCluster",
++  "/src/view/inspection/dashboard.vue": "InspectionDashboard",
+   "/src/view/inspection/report.vue": "InspectionReport",
+   "/src/view/inspection/rule.vue": "InspectionRule",
+   "/src/view/inspection/task.vue": "InspectionTask",
+   "/src/view/layout/aside/CollapseBar.vue": "AsideCollapseBar",
+   "/src/view/layout/aside/combinationMode.vue": "AsideCombinationMode",
+   "/src/view/layout/aside/headMode.vue": "AsideHeadMode",
+   "/src/view/layout/aside/index.vue": "GvaAside",
+   "/src/view/layout/aside/MobileMenuDrawer.vue": "MobileMenuDrawer",
+   "/src/view/layout/aside/normalMode.vue": "AsideNormalMode",
+   "/src/view/layout/aside/sidebarMode.vue": "SidebarMode",
+diff --git a/web/src/view/inspection/dashboard.vue b/web/src/view/inspection/dashboard.vue
+new file mode 100644
+index 00000000..3c3c426f
+--- /dev/null
++++ b/web/src/view/inspection/dashboard.vue
+@@ -0,0 +1,165 @@
++<template>
++  <div class="dashboard">
++    <el-row :gutter="16" class="summary-row">
++      <el-col v-for="card in summaryCards" :key="card.label" :xs="12" :sm="12" :md="6">
++        <el-card shadow="never" class="summary-card">
++          <div class="summary-label">{{ card.label }}</div>
++          <div class="summary-value">{{ card.value }}</div>
++        </el-card>
++      </el-col>
++    </el-row>
++
++    <el-row :gutter="16">
++      <el-col :xs="24" :lg="14">
++        <el-card shadow="never" class="chart-card">
++          <template #header>近 7 天异常趋势</template>
++          <Chart height="320px" :option="trendOption" />
++        </el-card>
++      </el-col>
++      <el-col :xs="24" :lg="10">
++        <el-card shadow="never" class="chart-card">
++          <template #header>告警级别分布</template>
++          <Chart height="320px" :option="levelOption" />
++        </el-card>
++      </el-col>
++    </el-row>
++
++    <el-row :gutter="16">
++      <el-col :xs="24" :lg="14">
++        <el-card shadow="never" class="chart-card">
++          <template #header>集群 CPU / 内存使用率</template>
++          <Chart height="320px" :option="usageOption" />
++        </el-card>
++      </el-col>
++      <el-col :xs="24" :lg="10">
++        <el-card shadow="never" class="chart-card">
++          <template #header>集群告警分布</template>
++          <Chart height="320px" :option="clusterOption" />
++        </el-card>
++      </el-col>
++    </el-row>
++  </div>
++</template>
++
++<script setup>
++  import { computed, onMounted, ref } from 'vue'
++  import { ElMessage } from 'element-plus'
++  import Chart from '@/components/charts/index.vue'
++  import {
++    getDashboardAlertDistribution,
++    getDashboardInspectionTrend,
++    getDashboardResourceUsage,
++    getDashboardSummary
++  } from '@/api/inspection'
++
++  defineOptions({ name: 'InspectionDashboard' })
++
++  const summary = ref({
++    clusterCount: 0,
++    nodeCount: 0,
++    todayInspectionCount: 0,
++    openAlertCount: 0
++  })
++  const usage = ref([])
++  const trend = ref([])
++  const distribution = ref({ byLevel: [], byCluster: [] })
++
++  const summaryCards = computed(() => [
++    { label: '集群数量', value: summary.value.clusterCount },
++    { label: '节点数量', value: summary.value.nodeCount },
++    { label: '今日巡检次数', value: summary.value.todayInspectionCount },
++    { label: '未关闭告警', value: summary.value.openAlertCount }
++  ])
++
++  const trendOption = computed(() => ({
++    tooltip: { trigger: 'axis' },
++    grid: { left: 48, right: 24, top: 28, bottom: 36 },
++    xAxis: { type: 'category', data: trend.value.map((item) => item.date.slice(5)) },
++    yAxis: { type: 'value', minInterval: 1 },
++    series: [{
++      name: '异常数',
++      type: 'line',
++      smooth: true,
++      data: trend.value.map((item) => item.anomalyCount),
++      areaStyle: { opacity: 0.16 },
++      lineStyle: { width: 3 },
++      itemStyle: { color: '#f56c6c' }
++    }]
++  }))
++
++  const usageOption = computed(() => ({
++    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
++    legend: { data: ['CPU', '内存'] },
++    grid: { left: 48, right: 24, top: 48, bottom: 60 },
++    xAxis: {
++      type: 'category',
++      data: usage.value.map((item) => item.clusterName),
++      axisLabel: { interval: 0, rotate: 20 }
++    },
++    yAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
++    series: [
++      { name: 'CPU', type: 'bar', data: usage.value.map((item) => item.cpuUsage), itemStyle: { color: '#409eff' } },
++      { name: '内存', type: 'bar', data: usage.value.map((item) => item.memoryUsage), itemStyle: { color: '#67c23a' } }
++    ]
++  }))
++
++  const pieOption = (data) => ({
++    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
++    legend: { bottom: 0, type: 'scroll' },
++    series: [{
++      type: 'pie',
++      radius: ['42%', '70%'],
++      avoidLabelOverlap: true,
++      label: { formatter: '{b}: {c}' },
++      data: data.map((item) => ({ name: item.name, value: item.count }))
++    }]
++  })
++  const levelOption = computed(() => pieOption(distribution.value.byLevel))
++  const clusterOption = computed(() => pieOption(distribution.value.byCluster))
++
++  const loadDashboard = async () => {
++    try {
++      const [summaryResult, usageResult, trendResult, distributionResult] = await Promise.all([
++        getDashboardSummary(),
++        getDashboardResourceUsage(),
++        getDashboardInspectionTrend({ days: 7 }),
++        getDashboardAlertDistribution()
++      ])
++      if (summaryResult.code === 0) summary.value = summaryResult.data
++      if (usageResult.code === 0) usage.value = usageResult.data
++      if (trendResult.code === 0) trend.value = trendResult.data
++      if (distributionResult.code === 0) distribution.value = distributionResult.data
++    } catch (error) {
++      ElMessage.error('加载巡检总览数据失败')
++    }
++  }
++
++  onMounted(loadDashboard)
++</script>
++
++<style scoped lang="scss">
++  .dashboard {
++    padding: 16px;
++  }
++
++  .summary-row,
++  .chart-card {
++    margin-bottom: 16px;
++  }
++
++  .summary-card {
++    margin-bottom: 16px;
++  }
++
++  .summary-label {
++    color: var(--el-text-color-secondary);
++    font-size: 14px;
++  }
++
++  .summary-value {
++    margin-top: 10px;
++    color: var(--el-text-color-primary);
++    font-size: 30px;
++    font-weight: 600;
++  }
++</style>

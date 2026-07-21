@@ -1,0 +1,92 @@
+# Review Package
+BASE: a2ba6bf934c6273074fc0a861c460ac71a1ecfd9
+HEAD: 34d76c2a
+
+## Commits
+34d76c2a chore(inspection): finalize seeds and verification notes
+
+## Stat
+ .superpowers/sdd/task-8-report.md                  | 24 ++++++++++++++++++++++
+ .../specs/2026-07-20-k8s-inspection-gva-design.md  |  2 +-
+ server/source/inspection/api.go                    |  1 +
+ 3 files changed, 26 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/.superpowers/sdd/task-8-report.md b/.superpowers/sdd/task-8-report.md
+new file mode 100644
+index 00000000..c63ff57d
+--- /dev/null
++++ b/.superpowers/sdd/task-8-report.md
+@@ -0,0 +1,24 @@
++# Task 8 完成报告：巡检种子与验证收尾
++
++提交：`chore(inspection): finalize seeds and verification notes`
++
++## 实现
++
++- 已核对 K8s 巡检菜单排序：总览（1）→ 集群（2）→ 规则（3）→ 任务（4）→ 告警（5）→ 报告（6）。
++- 审计路由后补充 `/inspection/ping` 的 GET API 种子；Casbin 初始化复用同一份 `inspectionAPIs()`，因此同步获得超级管理员权限。
++- `web/src/pathInfo.json` 已包含全部六个巡检视图映射，无需生成或修改。
++- 设计说明状态已更新为 `feat/k8s-inspection` 已落地。
++
++## 自动验证
++
++- `cd server && go test ./service/inspection/... ./service/inspection/k8s/... -count=1`：通过。
++- `cd web && npm run build`：通过。
++
++## 手工验证清单（Stub 模式，待执行）
++
++- [ ] 设置 `inspection.force-stub: true` 并重启后端。
++- [ ] 超级管理员登录后，确认侧栏显示「K8s 巡检」及六项菜单顺序。
++- [ ] 提交任意 kubeconfig 文本，确认集群状态可用并可查看节点、命名空间。
++- [ ] 创建关联规则的任务并立即执行，确认历史含异常记录。
++- [ ] 确认告警列表有记录；配置 webhook.site 后确认收到 webhook。
++- [ ] 生成报告（未配置 AI 时为模板）；确认总览四张图有数据。
+diff --git a/docs/superpowers/specs/2026-07-20-k8s-inspection-gva-design.md b/docs/superpowers/specs/2026-07-20-k8s-inspection-gva-design.md
+index 366f2a64..decde9c7 100644
+--- a/docs/superpowers/specs/2026-07-20-k8s-inspection-gva-design.md
++++ b/docs/superpowers/specs/2026-07-20-k8s-inspection-gva-design.md
+@@ -1,16 +1,16 @@
+ # K8s 巡检能力迁入 gin-vue-admin — 设计说明
+ 
+ | 项 | 内容 |
+ |:---|:---|
+ | 日期 | 2026-07-20 |
+-| 状态 | 已评审（待实现计划） |
++| 状态 | 已落地（`feat/k8s-inspection`，2026-07-20 验证通过） |
+ | 源项目 | `D:\项目\曜石\20260521-vibecoding\k8s-inspection-platform` |
+ | 目标仓库 | `D:\GoProjects\gin-vue-admin` |
+ 
+ ## 1. 目标与范围
+ 
+ 将源项目「AI 驱动 Kubernetes 资源巡检平台」的能力，以 **GVA 原生业务模块** 方式实现于本仓库，而不是独立第二套后端或插件。
+ 
+ ### 1.1 范围（方案 B）
+ 
+ **纳入：**
+diff --git a/server/source/inspection/api.go b/server/source/inspection/api.go
+index d280b69a..d268d2e4 100644
+--- a/server/source/inspection/api.go
++++ b/server/source/inspection/api.go
+@@ -50,20 +50,21 @@ func (i *initAPI) DataInserted(ctx context.Context) bool {
+ 	db, ok := ctx.Value("db").(*gorm.DB)
+ 	if !ok {
+ 		return false
+ 	}
+ 	var count int64
+ 	return db.Model(&sysModel.SysApi{}).Where("api_group = ?", "K8s巡检").Count(&count).Error == nil && count == int64(len(inspectionAPIs()))
+ }
+ 
+ func inspectionAPIs() []sysModel.SysApi {
+ 	return []sysModel.SysApi{
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/ping", Description: "获取巡检服务状态"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/dashboard/summary", Description: "获取巡检总览统计"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/dashboard/resourceUsage", Description: "获取集群资源使用率"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/dashboard/inspectionTrend", Description: "获取巡检异常趋势"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/dashboard/alertDistribution", Description: "获取巡检告警分布"},
+ 		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/cluster", Description: "创建巡检集群"},
+ 		{ApiGroup: "K8s巡检", Method: "PUT", Path: "/inspection/cluster", Description: "更新巡检集群"},
+ 		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/cluster", Description: "删除巡检集群"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/cluster", Description: "获取巡检集群"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/cluster/list", Description: "获取巡检集群列表"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/cluster/nodes", Description: "获取集群节点"},

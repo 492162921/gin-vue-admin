@@ -1,0 +1,1944 @@
+# Review Package
+BASE: d634503f61133391a2a3133114d3f7b6a10443d6
+HEAD: f7eb0b29
+
+## Commits
+f7eb0b29 feat(inspection): reports with AI and template fallback
+
+## Stat
+ server/api/v1/inspection/enter.go        |   2 +
+ server/api/v1/inspection/report.go       | 120 ++++++++++++
+ server/docs/docs.go                      | 321 ++++++++++++++++++++++++++++++-
+ server/docs/swagger.json                 | 321 ++++++++++++++++++++++++++++++-
+ server/docs/swagger.yaml                 | 183 +++++++++++++++++-
+ server/initialize/timer.go               |   8 +-
+ server/router/inspection/enter.go        |   2 +
+ server/router/inspection/inspection.go   |   1 +
+ server/router/inspection/report.go       |  22 +++
+ server/service/inspection/enter.go       |   1 +
+ server/service/inspection/report.go      | 126 ++++++++++++
+ server/service/inspection/report_ai.go   |  86 +++++++++
+ server/service/inspection/report_test.go |  93 +++++++++
+ server/service/inspection/webhook.go     |  41 ++++
+ server/source/inspection/api.go          |   5 +
+ server/source/inspection/menu.go         |   3 +-
+ web/src/api/inspection.js                |  11 ++
+ web/src/pathInfo.json                    |   2 +
+ web/src/view/inspection/report.vue       | 101 ++++++++++
+ 19 files changed, 1436 insertions(+), 13 deletions(-)
+
+## Diff
+diff --git a/server/api/v1/inspection/enter.go b/server/api/v1/inspection/enter.go
+index d94d628f..fc959379 100644
+--- a/server/api/v1/inspection/enter.go
++++ b/server/api/v1/inspection/enter.go
+@@ -3,18 +3,20 @@ package inspection
+ import service "github.com/flipped-aurora/gin-vue-admin/server/service"
+ 
+ type HealthStubApi struct{}
+ 
+ type ApiGroup struct {
+ 	HealthStubApi
+ 	ClusterApi
+ 	RuleApi
+ 	TaskApi
+ 	AlertApi
++	ReportApi
+ }
+ 
+ var (
+ 	clusterService = service.ServiceGroupApp.InspectionServiceGroup.ClusterService
+ 	ruleService    = service.ServiceGroupApp.InspectionServiceGroup.RuleService
+ 	taskService    = service.ServiceGroupApp.InspectionServiceGroup.TaskService
+ 	alertService   = service.ServiceGroupApp.InspectionServiceGroup.AlertService
++	reportService  = service.ServiceGroupApp.InspectionServiceGroup.ReportService
+ )
+diff --git a/server/api/v1/inspection/report.go b/server/api/v1/inspection/report.go
+new file mode 100644
+index 00000000..34194949
+--- /dev/null
++++ b/server/api/v1/inspection/report.go
+@@ -0,0 +1,120 @@
++package inspection
++
++import (
++	"github.com/flipped-aurora/gin-vue-admin/server/model/common/response"
++	inspRequest "github.com/flipped-aurora/gin-vue-admin/server/model/inspection/request"
++	"github.com/gin-gonic/gin"
++)
++
++type ReportApi struct{}
++
++// List
++// @Tags      InspReport
++// @Summary   分页获取巡检报告列表
++// @Security  ApiKeyAuth
++// @Produce   application/json
++// @Param     data  query     inspRequest.ReportSearch                                  true  "分页与筛选条件"
++// @Success   200   {object}  response.Response{data=response.PageResult{list=[]inspection.InspReport},msg=string}  "报告列表"
++// @Router    /inspection/report/list [get]
++func (a *ReportApi) List(c *gin.Context) {
++	var search inspRequest.ReportSearch
++	if err := c.ShouldBindQuery(&search); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	list, total, err := reportService.List(c.Request.Context(), search)
++	if err != nil {
++		response.FailWithMessage("获取巡检报告列表失败", c)
++		return
++	}
++	response.OkWithDetailed(response.PageResult{List: list, Total: total, Page: search.Page, PageSize: search.PageSize}, "获取成功", c)
++}
++
++// Get
++// @Tags      InspReport
++// @Summary   获取巡检报告详情
++// @Security  ApiKeyAuth
++// @Produce   application/json
++// @Param     id    query     uint                                                     true  "报告ID"
++// @Success   200   {object}  response.Response{data=inspection.InspReport,msg=string}  "报告详情"
++// @Router    /inspection/report [get]
++func (a *ReportApi) Get(c *gin.Context) {
++	var input inspectionIDRequest
++	if err := c.ShouldBindQuery(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	report, err := reportService.Get(c.Request.Context(), input.ID)
++	if err != nil {
++		response.FailWithMessage("获取巡检报告失败", c)
++		return
++	}
++	response.OkWithData(report, c)
++}
++
++// Generate
++// @Tags      InspReport
++// @Summary   为巡检结果生成报告
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  body      inspectionIDRequest                                      true  "巡检ID"
++// @Success   200   {object}  response.Response{data=inspection.InspReport,msg=string}  "生成的报告"
++// @Router    /inspection/report/generate [post]
++func (a *ReportApi) Generate(c *gin.Context) {
++	var input inspectionIDRequest
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	report, err := reportService.Generate(c.Request.Context(), input.ID)
++	if err != nil {
++		response.FailWithMessage("生成巡检报告失败", c)
++		return
++	}
++	response.OkWithData(report, c)
++}
++
++// Push
++// @Tags      InspReport
++// @Summary   推送巡检报告摘要到 Webhook
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  body      inspectionIDRequest              true  "报告ID"
++// @Success   200   {object}  response.Response{msg=string}   "推送结果"
++// @Router    /inspection/report/push [post]
++func (a *ReportApi) Push(c *gin.Context) {
++	var input inspectionIDRequest
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	if err := reportService.Push(c.Request.Context(), input.ID); err != nil {
++		response.FailWithMessage("推送巡检报告失败", c)
++		return
++	}
++	response.OkWithMessage("推送成功", c)
++}
++
++// Delete
++// @Tags      InspReport
++// @Summary   删除巡检报告
++// @Security  ApiKeyAuth
++// @accept    application/json
++// @Produce   application/json
++// @Param     data  body      inspectionIDRequest             true  "报告ID"
++// @Success   200   {object}  response.Response{msg=string}  "删除结果"
++// @Router    /inspection/report [delete]
++func (a *ReportApi) Delete(c *gin.Context) {
++	var input inspectionIDRequest
++	if err := c.ShouldBindJSON(&input); err != nil {
++		response.FailWithMessage(err.Error(), c)
++		return
++	}
++	if err := reportService.Delete(c.Request.Context(), input.ID); err != nil {
++		response.FailWithMessage("删除巡检报告失败", c)
++		return
++	}
++	response.OkWithMessage("删除成功", c)
++}
+diff --git a/server/docs/docs.go b/server/docs/docs.go
+index 0e44239a..4656f474 100644
+--- a/server/docs/docs.go
++++ b/server/docs/docs.go
+@@ -6056,20 +6056,303 @@ const docTemplate = `{
+                                             "type": "string"
+                                         }
+                                     }
+                                 }
+                             ]
+                         }
+                     }
+                 }
+             }
+         },
++        "/inspection/report": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspReport"
++                ],
++                "summary": "获取巡检报告详情",
++                "parameters": [
++                    {
++                        "type": "integer",
++                        "description": "报告ID",
++                        "name": "id",
++                        "in": "query",
++                        "required": true
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "报告详情",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "$ref": "#/definitions/inspection.InspReport"
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            },
++            "delete": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "consumes": [
++                    "application/json"
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspReport"
++                ],
++                "summary": "删除巡检报告",
++                "parameters": [
++                    {
++                        "description": "报告ID",
++                        "name": "data",
++                        "in": "body",
++                        "required": true,
++                        "schema": {
++                            "$ref": "#/definitions/inspection.inspectionIDRequest"
++                        }
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "删除结果",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/report/generate": {
++            "post": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "consumes": [
++                    "application/json"
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspReport"
++                ],
++                "summary": "为巡检结果生成报告",
++                "parameters": [
++                    {
++                        "description": "巡检ID",
++                        "name": "data",
++                        "in": "body",
++                        "required": true,
++                        "schema": {
++                            "$ref": "#/definitions/inspection.inspectionIDRequest"
++                        }
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "生成的报告",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "$ref": "#/definitions/inspection.InspReport"
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/report/list": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspReport"
++                ],
++                "summary": "分页获取巡检报告列表",
++                "parameters": [
++                    {
++                        "type": "integer",
++                        "name": "inspectionId",
++                        "in": "query"
++                    },
++                    {
++                        "type": "string",
++                        "description": "关键字",
++                        "name": "keyword",
++                        "in": "query"
++                    },
++                    {
++                        "type": "integer",
++                        "description": "页码",
++                        "name": "page",
++                        "in": "query"
++                    },
++                    {
++                        "type": "integer",
++                        "description": "每页大小",
++                        "name": "pageSize",
++                        "in": "query"
++                    },
++                    {
++                        "type": "string",
++                        "name": "title",
++                        "in": "query"
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "报告列表",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "allOf": [
++                                                {
++                                                    "$ref": "#/definitions/response.PageResult"
++                                                },
++                                                {
++                                                    "type": "object",
++                                                    "properties": {
++                                                        "list": {
++                                                            "type": "array",
++                                                            "items": {
++                                                                "$ref": "#/definitions/inspection.InspReport"
++                                                            }
++                                                        }
++                                                    }
++                                                }
++                                            ]
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/report/push": {
++            "post": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "consumes": [
++                    "application/json"
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspReport"
++                ],
++                "summary": "推送巡检报告摘要到 Webhook",
++                "parameters": [
++                    {
++                        "description": "报告ID",
++                        "name": "data",
++                        "in": "body",
++                        "required": true,
++                        "schema": {
++                            "$ref": "#/definitions/inspection.inspectionIDRequest"
++                        }
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "推送结果",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
+         "/inspection/rule": {
+             "put": {
+                 "security": [
+                     {
+                         "ApiKeyAuth": []
+                     }
+                 ],
+                 "consumes": [
+                     "application/json"
+                 ],
+@@ -16073,20 +16356,52 @@ const docTemplate = `{
+                 },
+                 "ruleType": {
+                     "type": "string"
+                 },
+                 "updatedAt": {
+                     "description": "更新时间",
+                     "type": "string"
+                 }
+             }
+         },
++        "inspection.InspReport": {
++            "type": "object",
++            "properties": {
++                "ID": {
++                    "description": "主键ID",
++                    "type": "integer"
++                },
++                "contentMd": {
++                    "type": "string"
++                },
++                "createdAt": {
++                    "description": "创建时间",
++                    "type": "string"
++                },
++                "digest": {
++                    "type": "string"
++                },
++                "inspectionId": {
++                    "type": "integer"
++                },
++                "source": {
++                    "type": "string"
++                },
++                "title": {
++                    "type": "string"
++                },
++                "updatedAt": {
++                    "description": "更新时间",
++                    "type": "string"
++                }
++            }
++        },
+         "inspection.InspRule": {
+             "type": "object",
+             "properties": {
+                 "ID": {
+                     "description": "主键ID",
+                     "type": "integer"
+                 },
+                 "createdAt": {
+                     "description": "创建时间",
+                     "type": "string"
+@@ -16206,29 +16521,27 @@ const docTemplate = `{
+                 },
+                 "podCount": {
+                     "type": "integer"
+                 }
+             }
+         },
+         "k8s.NodeInfo": {
+             "type": "object",
+             "properties": {
+                 "cpuusage": {
+-                    "type": "number",
+-                    "format": "float64"
++                    "type": "number"
+                 },
+                 "diskPressure": {
+                     "type": "boolean"
+                 },
+                 "memUsage": {
+-                    "type": "number",
+-                    "format": "float64"
++                    "type": "number"
+                 },
+                 "memoryPressure": {
+                     "type": "boolean"
+                 },
+                 "name": {
+                     "type": "string"
+                 },
+                 "networkUnavailable": {
+                     "type": "boolean"
+                 },
+diff --git a/server/docs/swagger.json b/server/docs/swagger.json
+index 2bb60513..f9de6103 100644
+--- a/server/docs/swagger.json
++++ b/server/docs/swagger.json
+@@ -6048,20 +6048,303 @@
+                                             "type": "string"
+                                         }
+                                     }
+                                 }
+                             ]
+                         }
+                     }
+                 }
+             }
+         },
++        "/inspection/report": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspReport"
++                ],
++                "summary": "获取巡检报告详情",
++                "parameters": [
++                    {
++                        "type": "integer",
++                        "description": "报告ID",
++                        "name": "id",
++                        "in": "query",
++                        "required": true
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "报告详情",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "$ref": "#/definitions/inspection.InspReport"
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            },
++            "delete": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "consumes": [
++                    "application/json"
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspReport"
++                ],
++                "summary": "删除巡检报告",
++                "parameters": [
++                    {
++                        "description": "报告ID",
++                        "name": "data",
++                        "in": "body",
++                        "required": true,
++                        "schema": {
++                            "$ref": "#/definitions/inspection.inspectionIDRequest"
++                        }
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "删除结果",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/report/generate": {
++            "post": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "consumes": [
++                    "application/json"
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspReport"
++                ],
++                "summary": "为巡检结果生成报告",
++                "parameters": [
++                    {
++                        "description": "巡检ID",
++                        "name": "data",
++                        "in": "body",
++                        "required": true,
++                        "schema": {
++                            "$ref": "#/definitions/inspection.inspectionIDRequest"
++                        }
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "生成的报告",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "$ref": "#/definitions/inspection.InspReport"
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/report/list": {
++            "get": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspReport"
++                ],
++                "summary": "分页获取巡检报告列表",
++                "parameters": [
++                    {
++                        "type": "integer",
++                        "name": "inspectionId",
++                        "in": "query"
++                    },
++                    {
++                        "type": "string",
++                        "description": "关键字",
++                        "name": "keyword",
++                        "in": "query"
++                    },
++                    {
++                        "type": "integer",
++                        "description": "页码",
++                        "name": "page",
++                        "in": "query"
++                    },
++                    {
++                        "type": "integer",
++                        "description": "每页大小",
++                        "name": "pageSize",
++                        "in": "query"
++                    },
++                    {
++                        "type": "string",
++                        "name": "title",
++                        "in": "query"
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "报告列表",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "data": {
++                                            "allOf": [
++                                                {
++                                                    "$ref": "#/definitions/response.PageResult"
++                                                },
++                                                {
++                                                    "type": "object",
++                                                    "properties": {
++                                                        "list": {
++                                                            "type": "array",
++                                                            "items": {
++                                                                "$ref": "#/definitions/inspection.InspReport"
++                                                            }
++                                                        }
++                                                    }
++                                                }
++                                            ]
++                                        },
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
++        "/inspection/report/push": {
++            "post": {
++                "security": [
++                    {
++                        "ApiKeyAuth": []
++                    }
++                ],
++                "consumes": [
++                    "application/json"
++                ],
++                "produces": [
++                    "application/json"
++                ],
++                "tags": [
++                    "InspReport"
++                ],
++                "summary": "推送巡检报告摘要到 Webhook",
++                "parameters": [
++                    {
++                        "description": "报告ID",
++                        "name": "data",
++                        "in": "body",
++                        "required": true,
++                        "schema": {
++                            "$ref": "#/definitions/inspection.inspectionIDRequest"
++                        }
++                    }
++                ],
++                "responses": {
++                    "200": {
++                        "description": "推送结果",
++                        "schema": {
++                            "allOf": [
++                                {
++                                    "$ref": "#/definitions/response.Response"
++                                },
++                                {
++                                    "type": "object",
++                                    "properties": {
++                                        "msg": {
++                                            "type": "string"
++                                        }
++                                    }
++                                }
++                            ]
++                        }
++                    }
++                }
++            }
++        },
+         "/inspection/rule": {
+             "put": {
+                 "security": [
+                     {
+                         "ApiKeyAuth": []
+                     }
+                 ],
+                 "consumes": [
+                     "application/json"
+                 ],
+@@ -16065,20 +16348,52 @@
+                 },
+                 "ruleType": {
+                     "type": "string"
+                 },
+                 "updatedAt": {
+                     "description": "更新时间",
+                     "type": "string"
+                 }
+             }
+         },
++        "inspection.InspReport": {
++            "type": "object",
++            "properties": {
++                "ID": {
++                    "description": "主键ID",
++                    "type": "integer"
++                },
++                "contentMd": {
++                    "type": "string"
++                },
++                "createdAt": {
++                    "description": "创建时间",
++                    "type": "string"
++                },
++                "digest": {
++                    "type": "string"
++                },
++                "inspectionId": {
++                    "type": "integer"
++                },
++                "source": {
++                    "type": "string"
++                },
++                "title": {
++                    "type": "string"
++                },
++                "updatedAt": {
++                    "description": "更新时间",
++                    "type": "string"
++                }
++            }
++        },
+         "inspection.InspRule": {
+             "type": "object",
+             "properties": {
+                 "ID": {
+                     "description": "主键ID",
+                     "type": "integer"
+                 },
+                 "createdAt": {
+                     "description": "创建时间",
+                     "type": "string"
+@@ -16198,29 +16513,27 @@
+                 },
+                 "podCount": {
+                     "type": "integer"
+                 }
+             }
+         },
+         "k8s.NodeInfo": {
+             "type": "object",
+             "properties": {
+                 "cpuusage": {
+-                    "type": "number",
+-                    "format": "float64"
++                    "type": "number"
+                 },
+                 "diskPressure": {
+                     "type": "boolean"
+                 },
+                 "memUsage": {
+-                    "type": "number",
+-                    "format": "float64"
++                    "type": "number"
+                 },
+                 "memoryPressure": {
+                     "type": "boolean"
+                 },
+                 "name": {
+                     "type": "string"
+                 },
+                 "networkUnavailable": {
+                     "type": "boolean"
+                 },
+diff --git a/server/docs/swagger.yaml b/server/docs/swagger.yaml
+index afc153a4..163e04b1 100644
+--- a/server/docs/swagger.yaml
++++ b/server/docs/swagger.yaml
+@@ -949,20 +949,42 @@ definitions:
+       resourceName:
+         type: string
+       resourceType:
+         type: string
+       ruleType:
+         type: string
+       updatedAt:
+         description: 更新时间
+         type: string
+     type: object
++  inspection.InspReport:
++    properties:
++      ID:
++        description: 主键ID
++        type: integer
++      contentMd:
++        type: string
++      createdAt:
++        description: 创建时间
++        type: string
++      digest:
++        type: string
++      inspectionId:
++        type: integer
++      source:
++        type: string
++      title:
++        type: string
++      updatedAt:
++        description: 更新时间
++        type: string
++    type: object
+   inspection.InspRule:
+     properties:
+       ID:
+         description: 主键ID
+         type: integer
+       createdAt:
+         description: 创建时间
+         type: string
+       enabled:
+         type: boolean
+@@ -1038,26 +1060,24 @@ definitions:
+   k8s.NamespaceInfo:
+     properties:
+       name:
+         type: string
+       podCount:
+         type: integer
+     type: object
+   k8s.NodeInfo:
+     properties:
+       cpuusage:
+-        format: float64
+         type: number
+       diskPressure:
+         type: boolean
+       memUsage:
+-        format: float64
+         type: number
+       memoryPressure:
+         type: boolean
+       name:
+         type: string
+       networkUnavailable:
+         type: boolean
+       pidpressure:
+         type: boolean
+       status:
+@@ -6925,20 +6945,179 @@ paths:
+             - $ref: '#/definitions/response.Response'
+             - properties:
+                 msg:
+                   type: string
+               type: object
+       security:
+       - ApiKeyAuth: []
+       summary: 巡检模块健康检查
+       tags:
+       - InspHealth
++  /inspection/report:
++    delete:
++      consumes:
++      - application/json
++      parameters:
++      - description: 报告ID
++        in: body
++        name: data
++        required: true
++        schema:
++          $ref: '#/definitions/inspection.inspectionIDRequest'
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 删除结果
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 删除巡检报告
++      tags:
++      - InspReport
++    get:
++      parameters:
++      - description: 报告ID
++        in: query
++        name: id
++        required: true
++        type: integer
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 报告详情
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                data:
++                  $ref: '#/definitions/inspection.InspReport'
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 获取巡检报告详情
++      tags:
++      - InspReport
++  /inspection/report/generate:
++    post:
++      consumes:
++      - application/json
++      parameters:
++      - description: 巡检ID
++        in: body
++        name: data
++        required: true
++        schema:
++          $ref: '#/definitions/inspection.inspectionIDRequest'
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 生成的报告
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                data:
++                  $ref: '#/definitions/inspection.InspReport'
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 为巡检结果生成报告
++      tags:
++      - InspReport
++  /inspection/report/list:
++    get:
++      parameters:
++      - in: query
++        name: inspectionId
++        type: integer
++      - description: 关键字
++        in: query
++        name: keyword
++        type: string
++      - description: 页码
++        in: query
++        name: page
++        type: integer
++      - description: 每页大小
++        in: query
++        name: pageSize
++        type: integer
++      - in: query
++        name: title
++        type: string
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 报告列表
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                data:
++                  allOf:
++                  - $ref: '#/definitions/response.PageResult'
++                  - properties:
++                      list:
++                        items:
++                          $ref: '#/definitions/inspection.InspReport'
++                        type: array
++                    type: object
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 分页获取巡检报告列表
++      tags:
++      - InspReport
++  /inspection/report/push:
++    post:
++      consumes:
++      - application/json
++      parameters:
++      - description: 报告ID
++        in: body
++        name: data
++        required: true
++        schema:
++          $ref: '#/definitions/inspection.inspectionIDRequest'
++      produces:
++      - application/json
++      responses:
++        "200":
++          description: 推送结果
++          schema:
++            allOf:
++            - $ref: '#/definitions/response.Response'
++            - properties:
++                msg:
++                  type: string
++              type: object
++      security:
++      - ApiKeyAuth: []
++      summary: 推送巡检报告摘要到 Webhook
++      tags:
++      - InspReport
+   /inspection/rule:
+     delete:
+       consumes:
+       - application/json
+       parameters:
+       - description: 规则ID
+         in: body
+         name: data
+         required: true
+         schema:
+diff --git a/server/initialize/timer.go b/server/initialize/timer.go
+index 9c9ab496..67474de4 100644
+--- a/server/initialize/timer.go
++++ b/server/initialize/timer.go
+@@ -23,15 +23,19 @@ func Timer() {
+ 		svc := mediaService.MediaUploadService{}
+ 		return svc.CleanupStale(ctx, global.GVA_CONFIG.Media.SessionTTL)
+ 	})
+ 	task.Register("RunInspectionTask", "执行 K8s 巡检任务", func(ctx context.Context, params json.RawMessage) error {
+ 		var input struct {
+ 			TaskID uint `json:"taskId"`
+ 		}
+ 		if err := json.Unmarshal(params, &input); err != nil {
+ 			return err
+ 		}
+-		service := inspectionService.TaskService{}
+-		_, err := service.RunNow(ctx, input.TaskID)
++		taskService := inspectionService.TaskService{}
++		inspection, err := taskService.RunNow(ctx, input.TaskID)
++		if err != nil {
++			return err
++		}
++		_, err = (&inspectionService.ReportService{}).Generate(ctx, inspection.ID)
+ 		return err
+ 	})
+ }
+diff --git a/server/router/inspection/enter.go b/server/router/inspection/enter.go
+index 9954401b..cc706d65 100644
+--- a/server/router/inspection/enter.go
++++ b/server/router/inspection/enter.go
+@@ -3,19 +3,21 @@ package inspection
+ import (
+ 	api "github.com/flipped-aurora/gin-vue-admin/server/api/v1"
+ )
+ 
+ type RouterGroup struct {
+ 	InspectionRouter
+ 	ClusterRouter
+ 	RuleRouter
+ 	TaskRouter
+ 	AlertRouter
++	ReportRouter
+ }
+ 
+ var (
+ 	healthStubApi = api.ApiGroupApp.InspectionApiGroup.HealthStubApi
+ 	clusterApi    = api.ApiGroupApp.InspectionApiGroup.ClusterApi
+ 	ruleApi       = api.ApiGroupApp.InspectionApiGroup.RuleApi
+ 	taskApi       = api.ApiGroupApp.InspectionApiGroup.TaskApi
+ 	alertApi      = api.ApiGroupApp.InspectionApiGroup.AlertApi
++	reportApi     = api.ApiGroupApp.InspectionApiGroup.ReportApi
+ )
+diff --git a/server/router/inspection/inspection.go b/server/router/inspection/inspection.go
+index 646201d3..cdf81d4e 100644
+--- a/server/router/inspection/inspection.go
++++ b/server/router/inspection/inspection.go
+@@ -6,11 +6,12 @@ type InspectionRouter struct{}
+ 
+ func (r *InspectionRouter) InitInspectionRouter(Router *gin.RouterGroup) {
+ 	g := Router.Group("inspection")
+ 	{
+ 		g.GET("ping", healthStubApi.Ping)
+ 	}
+ 	(&ClusterRouter{}).InitClusterRouter(Router)
+ 	(&RuleRouter{}).InitRuleRouter(Router)
+ 	(&TaskRouter{}).InitTaskRouter(Router)
+ 	(&AlertRouter{}).InitAlertRouter(Router)
++	(&ReportRouter{}).InitReportRouter(Router)
+ }
+diff --git a/server/router/inspection/report.go b/server/router/inspection/report.go
+new file mode 100644
+index 00000000..8c3dc14d
+--- /dev/null
++++ b/server/router/inspection/report.go
+@@ -0,0 +1,22 @@
++package inspection
++
++import (
++	"github.com/flipped-aurora/gin-vue-admin/server/middleware"
++	"github.com/gin-gonic/gin"
++)
++
++type ReportRouter struct{}
++
++func (r *ReportRouter) InitReportRouter(router *gin.RouterGroup) {
++	record := router.Group("inspection/report").Use(middleware.OperationRecord())
++	read := router.Group("inspection/report")
++	{
++		record.POST("generate", reportApi.Generate)
++		record.POST("push", reportApi.Push)
++		record.DELETE("", reportApi.Delete)
++	}
++	{
++		read.GET("", reportApi.Get)
++		read.GET("list", reportApi.List)
++	}
++}
+diff --git a/server/service/inspection/enter.go b/server/service/inspection/enter.go
+index 180f9a59..1a8a1996 100644
+--- a/server/service/inspection/enter.go
++++ b/server/service/inspection/enter.go
+@@ -1,8 +1,9 @@
+ package inspection
+ 
+ type ServiceGroup struct {
+ 	ClusterService
+ 	RuleService
+ 	TaskService
+ 	AlertService
++	ReportService
+ }
+diff --git a/server/service/inspection/report.go b/server/service/inspection/report.go
+new file mode 100644
+index 00000000..45069353
+--- /dev/null
++++ b/server/service/inspection/report.go
+@@ -0,0 +1,126 @@
++package inspection
++
++import (
++	"context"
++	"fmt"
++	"strings"
++
++	"github.com/flipped-aurora/gin-vue-admin/server/global"
++	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
++	inspRequest "github.com/flipped-aurora/gin-vue-admin/server/model/inspection/request"
++	"go.uber.org/zap"
++)
++
++type ReportService struct{}
++
++func (s *ReportService) Generate(ctx context.Context, inspectionID uint) (*inspModel.InspReport, error) {
++	inspection, err := s.inspectionWithDetails(ctx, inspectionID)
++	if err != nil {
++		return nil, err
++	}
++	template := renderReportTemplate(inspection)
++	content, source := template, "template"
++	config := global.GVA_CONFIG.Inspection
++	if strings.TrimSpace(config.AIBaseURL) != "" && strings.TrimSpace(config.AIAPIKey) != "" {
++		aiContent, aiErr := newOpenAIChatClient(config.AIBaseURL, config.AIAPIKey, config.AIModel).
++			Complete(ctx, "你是 Kubernetes 巡检分析助手。请用中文输出简洁、可执行的 Markdown 巡检报告。", template)
++		if aiErr == nil {
++			content, source = aiContent, "ai"
++		} else if global.GVA_LOG != nil {
++			global.GVA_LOG.Warn("生成 AI 巡检报告失败，回退到模板", zap.Error(aiErr))
++		}
++	}
++	report := &inspModel.InspReport{
++		InspectionID: inspection.ID,
++		Title:        fmt.Sprintf("巡检报告 #%d", inspection.ID),
++		ContentMD:    content,
++		Digest:       reportDigest(inspection.Summary),
++		Source:       source,
++	}
++	if err := global.GVA_DB.WithContext(ctx).Create(report).Error; err != nil {
++		return nil, err
++	}
++	return report, nil
++}
++
++func (s *ReportService) List(ctx context.Context, search inspRequest.ReportSearch) ([]inspModel.InspReport, int64, error) {
++	db := global.GVA_DB.WithContext(ctx).Model(&inspModel.InspReport{})
++	if search.Title != "" {
++		db = db.Where("title LIKE ?", "%"+search.Title+"%")
++	}
++	if search.InspectionID != 0 {
++		db = db.Where("inspection_id = ?", search.InspectionID)
++	}
++	var total int64
++	if err := db.Count(&total).Error; err != nil {
++		return nil, 0, err
++	}
++	limit, offset := search.LimitOffset()
++	var reports []inspModel.InspReport
++	if err := db.Order("id DESC").Limit(limit).Offset(offset).Find(&reports).Error; err != nil {
++		return nil, 0, err
++	}
++	return reports, total, nil
++}
++
++func (s *ReportService) Get(ctx context.Context, reportID uint) (*inspModel.InspReport, error) {
++	var report inspModel.InspReport
++	if err := global.GVA_DB.WithContext(ctx).First(&report, reportID).Error; err != nil {
++		return nil, err
++	}
++	return &report, nil
++}
++
++func (s *ReportService) Push(ctx context.Context, reportID uint) error {
++	report, err := s.Get(ctx, reportID)
++	if err != nil {
++		return err
++	}
++	return NotifyReportWebhook(global.GVA_CONFIG.Inspection.WebhookURL, report.Title, truncateRunes(report.Digest, 200))
++}
++
++func (s *ReportService) Delete(ctx context.Context, reportID uint) error {
++	return global.GVA_DB.WithContext(ctx).Delete(&inspModel.InspReport{}, "id = ?", reportID).Error
++}
++
++func (s *ReportService) inspectionWithDetails(ctx context.Context, inspectionID uint) (*inspModel.InspInspection, error) {
++	var inspection inspModel.InspInspection
++	if err := global.GVA_DB.WithContext(ctx).Preload("Details").First(&inspection, inspectionID).Error; err != nil {
++		return nil, err
++	}
++	return &inspection, nil
++}
++
++func renderReportTemplate(inspection *inspModel.InspInspection) string {
++	var builder strings.Builder
++	fmt.Fprintf(&builder, "# 巡检报告 #%d\n\n", inspection.ID)
++	fmt.Fprintf(&builder, "- 状态：%s\n- 巡检摘要：%s\n- 异常数量：%d\n\n", inspection.Status, inspection.Summary, inspection.AnomalyCount)
++	builder.WriteString("## 异常明细\n\n")
++	found := false
++	for _, detail := range inspection.Details {
++		if detail.IsAnomaly {
++			found = true
++			fmt.Fprintf(&builder, "- **%s**（%s）：%s\n", detail.ResourceName, detail.RuleType, detail.Message)
++		}
++	}
++	if !found {
++		builder.WriteString("- 未发现异常。\n")
++	}
++	return builder.String()
++}
++
++func reportDigest(summary string) string {
++	summary = strings.TrimSpace(summary)
++	if summary == "" {
++		summary = "巡检报告已生成"
++	}
++	return truncateRunes(summary, 200)
++}
++
++func truncateRunes(value string, limit int) string {
++	runes := []rune(value)
++	if len(runes) <= limit {
++		return value
++	}
++	return string(runes[:limit])
++}
+diff --git a/server/service/inspection/report_ai.go b/server/service/inspection/report_ai.go
+new file mode 100644
+index 00000000..f3e5a0a0
+--- /dev/null
++++ b/server/service/inspection/report_ai.go
+@@ -0,0 +1,86 @@
++package inspection
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net/http"
++	"strings"
++	"time"
++)
++
++type openAIChatClient struct {
++	baseURL string
++	apiKey  string
++	model   string
++	client  *http.Client
++}
++
++func newOpenAIChatClient(baseURL, apiKey, model string) *openAIChatClient {
++	return &openAIChatClient{
++		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
++		apiKey:  apiKey,
++		model:   model,
++		client:  &http.Client{Timeout: 30 * time.Second},
++	}
++}
++
++func (c *openAIChatClient) Complete(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
++	payload := struct {
++		Model    string `json:"model"`
++		Messages []struct {
++			Role    string `json:"role"`
++			Content string `json:"content"`
++		} `json:"messages"`
++	}{
++		Model: c.model,
++		Messages: []struct {
++			Role    string `json:"role"`
++			Content string `json:"content"`
++		}{
++			{Role: "system", Content: systemPrompt},
++			{Role: "user", Content: userPrompt},
++		},
++	}
++	if payload.Model == "" {
++		payload.Model = "gpt-4o-mini"
++	}
++	body, err := json.Marshal(payload)
++	if err != nil {
++		return "", fmt.Errorf("marshal AI request: %w", err)
++	}
++	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
++	if err != nil {
++		return "", fmt.Errorf("create AI request: %w", err)
++	}
++	request.Header.Set("Authorization", "Bearer "+c.apiKey)
++	request.Header.Set("Content-Type", "application/json")
++	response, err := c.client.Do(request)
++	if err != nil {
++		return "", fmt.Errorf("send AI request: %w", err)
++	}
++	defer response.Body.Close()
++	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
++		return "", fmt.Errorf("AI request returned HTTP %d", response.StatusCode)
++	}
++	raw, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
++	if err != nil {
++		return "", fmt.Errorf("read AI response: %w", err)
++	}
++	var result struct {
++		Choices []struct {
++			Message struct {
++				Content string `json:"content"`
++			} `json:"message"`
++		} `json:"choices"`
++	}
++	if err := json.Unmarshal(raw, &result); err != nil {
++		return "", fmt.Errorf("decode AI response: %w", err)
++	}
++	if len(result.Choices) == 0 || strings.TrimSpace(result.Choices[0].Message.Content) == "" {
++		return "", fmt.Errorf("AI response has no message content")
++	}
++	return strings.TrimSpace(result.Choices[0].Message.Content), nil
++}
+diff --git a/server/service/inspection/report_test.go b/server/service/inspection/report_test.go
+new file mode 100644
+index 00000000..7850c765
+--- /dev/null
++++ b/server/service/inspection/report_test.go
+@@ -0,0 +1,93 @@
++package inspection
++
++import (
++	"context"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/flipped-aurora/gin-vue-admin/server/global"
++	"github.com/flipped-aurora/gin-vue-admin/server/internal/testutil"
++	inspModel "github.com/flipped-aurora/gin-vue-admin/server/model/inspection"
++)
++
++func TestGenerateFallsBackToTemplate(t *testing.T) {
++	testutil.NewMemoryDB(t, &inspModel.InspInspection{}, &inspModel.InspInspectionDetail{}, &inspModel.InspReport{})
++	originalConfig := global.GVA_CONFIG.Inspection
++	t.Cleanup(func() { global.GVA_CONFIG.Inspection = originalConfig })
++	global.GVA_CONFIG.Inspection.AIBaseURL = ""
++	global.GVA_CONFIG.Inspection.AIAPIKey = ""
++
++	inspectionID := createReportInspection(t)
++	report, err := (&ReportService{}).Generate(context.Background(), inspectionID)
++	if err != nil {
++		t.Fatalf("generate report: %v", err)
++	}
++	if report.Source != "template" {
++		t.Fatalf("source = %q, want template", report.Source)
++	}
++	if strings.TrimSpace(report.ContentMD) == "" {
++		t.Fatal("template content is empty")
++	}
++}
++
++func TestGenerateUsesAIWhenConfigured(t *testing.T) {
++	testutil.NewMemoryDB(t, &inspModel.InspInspection{}, &inspModel.InspInspectionDetail{}, &inspModel.InspReport{})
++	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if r.URL.Path != "/chat/completions" {
++			t.Fatalf("path = %s", r.URL.Path)
++		}
++		if r.Header.Get("Authorization") != "Bearer test-key" {
++			t.Fatal("missing authorization header")
++		}
++		w.Header().Set("Content-Type", "application/json")
++		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"# AI 巡检报告\nAI 摘要"}}]}`))
++	}))
++	t.Cleanup(server.Close)
++	originalConfig := global.GVA_CONFIG.Inspection
++	t.Cleanup(func() { global.GVA_CONFIG.Inspection = originalConfig })
++	global.GVA_CONFIG.Inspection.AIBaseURL = server.URL
++	global.GVA_CONFIG.Inspection.AIAPIKey = "test-key"
++	global.GVA_CONFIG.Inspection.AIModel = "test-model"
++
++	report, err := (&ReportService{}).Generate(context.Background(), createReportInspection(t))
++	if err != nil {
++		t.Fatalf("generate report: %v", err)
++	}
++	if report.Source != "ai" {
++		t.Fatalf("source = %q, want ai", report.Source)
++	}
++	if report.ContentMD != "# AI 巡检报告\nAI 摘要" {
++		t.Fatalf("unexpected AI content: %q", report.ContentMD)
++	}
++}
++
++func createReportInspection(t *testing.T) uint {
++	t.Helper()
++	now := time.Now()
++	inspection := inspModel.InspInspection{
++		TaskID:       1,
++		Status:       "success",
++		AnomalyCount: 1,
++		Summary:      "巡检完成，共 2 项，异常 1 项",
++		StartedAt:    now,
++		FinishedAt:   &now,
++	}
++	if err := global.GVA_DB.Create(&inspection).Error; err != nil {
++		t.Fatalf("create inspection: %v", err)
++	}
++	detail := inspModel.InspInspectionDetail{
++		InspectionID: inspection.ID,
++		RuleType:     "pod_failed",
++		ResourceType: "pod",
++		ResourceName: "default/api",
++		Message:      "Phase Failed",
++		IsAnomaly:    true,
++	}
++	if err := global.GVA_DB.Create(&detail).Error; err != nil {
++		t.Fatalf("create detail: %v", err)
++	}
++	return inspection.ID
++}
+diff --git a/server/service/inspection/webhook.go b/server/service/inspection/webhook.go
+index 112e660b..9f1533d0 100644
+--- a/server/service/inspection/webhook.go
++++ b/server/service/inspection/webhook.go
+@@ -71,20 +71,61 @@ func NotifyWebhook(webhookURL string, payload AlertWebhookPayload) error {
+ 			ErrCode int    `json:"errcode"`
+ 			ErrMsg  string `json:"errmsg"`
+ 		}
+ 		if json.Unmarshal(responseBody, &result) == nil && result.ErrCode != 0 {
+ 			return fmt.Errorf("dingtalk errcode=%d errmsg=%s", result.ErrCode, result.ErrMsg)
+ 		}
+ 	}
+ 	return nil
+ }
+ 
++func NotifyReportWebhook(webhookURL, title, digest string) error {
++	webhookURL = strings.TrimSpace(webhookURL)
++	if webhookURL == "" {
++		return nil
++	}
++	content := fmt.Sprintf("【日志】【信息】K8s 巡检报告\n标题: %s\n摘要: %s", displayValue(title), displayValue(digest))
++	var body any
++	if strings.Contains(webhookURL, "oapi.dingtalk.com") {
++		body = map[string]any{
++			"msgtype": "text",
++			"text":    map[string]string{"content": content},
++		}
++	} else {
++		body = map[string]any{
++			"event":   "inspection_report",
++			"title":   title,
++			"digest":  digest,
++			"message": content,
++		}
++	}
++	raw, err := json.Marshal(body)
++	if err != nil {
++		return err
++	}
++	request, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewReader(raw))
++	if err != nil {
++		return err
++	}
++	request.Header.Set("Content-Type", "application/json; charset=utf-8")
++	response, err := (&http.Client{Timeout: 8 * time.Second}).Do(request)
++	if err != nil {
++		return err
++	}
++	defer response.Body.Close()
++	responseBody, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
++	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
++		return fmt.Errorf("webhook http %d: %s", response.StatusCode, strings.TrimSpace(string(responseBody)))
++	}
++	return nil
++}
++
+ func formatAlertWebhookContent(payload AlertWebhookPayload) string {
+ 	var content strings.Builder
+ 	content.WriteString("【日志】【信息】K8s 巡检告警\n")
+ 	content.WriteString(fmt.Sprintf("任务: %s (id=%d)\n", displayValue(payload.TaskName), payload.TaskID))
+ 	content.WriteString(fmt.Sprintf("集群: %s\n", displayValue(payload.ClusterName)))
+ 	content.WriteString(fmt.Sprintf("巡检ID: %d\n异常数: %d\n", payload.InspectionID, payload.AnomalyCount))
+ 	if payload.Summary != "" {
+ 		content.WriteString("摘要: " + payload.Summary + "\n")
+ 	}
+ 	for _, sample := range payload.Samples {
+diff --git a/server/source/inspection/api.go b/server/source/inspection/api.go
+index 5651d72e..77939e4c 100644
+--- a/server/source/inspection/api.go
++++ b/server/source/inspection/api.go
+@@ -74,12 +74,17 @@ func inspectionAPIs() []sysModel.SysApi {
+ 		{ApiGroup: "K8s巡检", Method: "PUT", Path: "/inspection/task", Description: "更新巡检任务"},
+ 		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/task", Description: "删除巡检任务"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/task", Description: "获取巡检任务"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/task/list", Description: "获取巡检任务列表"},
+ 		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/task/run", Description: "立即执行巡检任务"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/task/inspections", Description: "获取巡检任务历史"},
+ 		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/alert/list", Description: "获取巡检告警列表"},
+ 		{ApiGroup: "K8s巡检", Method: "PATCH", Path: "/inspection/alert/status", Description: "更新巡检告警状态"},
+ 		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/alert", Description: "删除巡检告警"},
+ 		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/alert/batch-delete", Description: "批量删除巡检告警"},
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/report/list", Description: "获取巡检报告列表"},
++		{ApiGroup: "K8s巡检", Method: "GET", Path: "/inspection/report", Description: "获取巡检报告详情"},
++		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/report/generate", Description: "生成巡检报告"},
++		{ApiGroup: "K8s巡检", Method: "POST", Path: "/inspection/report/push", Description: "推送巡检报告"},
++		{ApiGroup: "K8s巡检", Method: "DELETE", Path: "/inspection/report", Description: "删除巡检报告"},
+ 	}
+ }
+diff --git a/server/source/inspection/menu.go b/server/source/inspection/menu.go
+index 575097e8..d298ba4a 100644
+--- a/server/source/inspection/menu.go
++++ b/server/source/inspection/menu.go
+@@ -42,20 +42,21 @@ func (i *initMenu) InitializeData(ctx context.Context) (context.Context, error)
+ 		Meta: sysModel.Meta{Title: "K8s 巡检", Icon: "monitor-gva"},
+ 	}
+ 	if err := db.Where("name = ?", parent.Name).FirstOrCreate(&parent).Error; err != nil {
+ 		return ctx, errors.Wrap(err, "初始化巡检父菜单失败")
+ 	}
+ 	children := []sysModel.SysBaseMenu{
+ 		{MenuLevel: 1, ParentId: parent.ID, Path: "cluster", Name: "inspectionCluster", Component: "view/inspection/cluster.vue", Sort: 1, Meta: sysModel.Meta{Title: "集群管理", Icon: "connection"}},
+ 		{MenuLevel: 1, ParentId: parent.ID, Path: "rule", Name: "inspectionRule", Component: "view/inspection/rule.vue", Sort: 2, Meta: sysModel.Meta{Title: "巡检规则", Icon: "set-up"}},
+ 		{MenuLevel: 1, ParentId: parent.ID, Path: "task", Name: "inspectionTask", Component: "view/inspection/task.vue", Sort: 3, Meta: sysModel.Meta{Title: "巡检任务", Icon: "calendar"}},
+ 		{MenuLevel: 1, ParentId: parent.ID, Path: "alert", Name: "inspectionAlert", Component: "view/inspection/alert.vue", Sort: 4, Meta: sysModel.Meta{Title: "巡检告警", Icon: "warning"}},
++		{MenuLevel: 1, ParentId: parent.ID, Path: "report", Name: "inspectionReport", Component: "view/inspection/report.vue", Sort: 5, Meta: sysModel.Meta{Title: "巡检报告", Icon: "document"}},
+ 	}
+ 	for _, menu := range children {
+ 		if err := db.Where("name = ?", menu.Name).FirstOrCreate(&menu).Error; err != nil {
+ 			return ctx, errors.Wrap(err, "初始化巡检子菜单失败")
+ 		}
+ 	}
+ 	var admin sysModel.SysAuthority
+ 	if err := db.Where("authority_id = ?", 888).First(&admin).Error; err != nil {
+ 		return ctx, errors.Wrap(err, "查询超级管理员失败")
+ 	}
+@@ -64,12 +65,12 @@ func (i *initMenu) InitializeData(ctx context.Context) (context.Context, error)
+ 		return ctx, errors.Wrap(err, "授予巡检菜单权限失败")
+ 	}
+ 	return ctx, nil
+ }
+ 
+ func (i *initMenu) DataInserted(ctx context.Context) bool {
+ 	db, ok := ctx.Value("db").(*gorm.DB)
+ 	if !ok {
+ 		return false
+ 	}
+-	return db.Where("name = ?", "inspectionAlert").First(&sysModel.SysBaseMenu{}).Error == nil
++	return db.Where("name = ?", "inspectionReport").First(&sysModel.SysBaseMenu{}).Error == nil
+ }
+diff --git a/web/src/api/inspection.js b/web/src/api/inspection.js
+index b7379382..8adf8a43 100644
+--- a/web/src/api/inspection.js
++++ b/web/src/api/inspection.js
+@@ -41,10 +41,21 @@ export const runTask = (data) => request('/inspection/task/run', 'post', data)
+ export const getTaskInspections = (params) =>
+   request('/inspection/task/inspections', 'get', undefined, params)
+ 
+ export const getAlertList = (params) =>
+   request('/inspection/alert/list', 'get', undefined, params)
+ export const updateAlertStatus = (id, data) =>
+   request('/inspection/alert/status', 'patch', data, { id })
+ export const deleteAlert = (data) => request('/inspection/alert', 'delete', data)
+ export const batchDeleteAlerts = (data) =>
+   request('/inspection/alert/batch-delete', 'delete', data)
++
++export const getReportList = (params) =>
++  request('/inspection/report/list', 'get', undefined, params)
++export const getReport = (params) =>
++  request('/inspection/report', 'get', undefined, params)
++export const generateReport = (data) =>
++  request('/inspection/report/generate', 'post', data)
++export const pushReport = (data) =>
++  request('/inspection/report/push', 'post', data)
++export const deleteReport = (data) =>
++  request('/inspection/report', 'delete', data)
+diff --git a/web/src/pathInfo.json b/web/src/pathInfo.json
+index 129b7a43..90384096 100644
+--- a/web/src/pathInfo.json
++++ b/web/src/pathInfo.json
+@@ -9,21 +9,23 @@
+   "/src/view/dashboard/components/pluginTable.vue": "PluginTable",
+   "/src/view/dashboard/components/quickLinks.vue": "QuickLinks",
+   "/src/view/dashboard/components/table.vue": "Table",
+   "/src/view/dashboard/components/wiki.vue": "Wiki",
+   "/src/view/dashboard/index.vue": "Dashboard",
+   "/src/view/error/index.vue": "Error",
+   "/src/view/error/reload.vue": "Reload",
+   "/src/view/example/customer/customer.vue": "Customer",
+   "/src/view/example/index.vue": "Example",
+   "/src/view/init/index.vue": "Init",
++  "/src/view/inspection/alert.vue": "InspectionAlert",
+   "/src/view/inspection/cluster.vue": "InspectionCluster",
++  "/src/view/inspection/report.vue": "InspectionReport",
+   "/src/view/inspection/rule.vue": "InspectionRule",
+   "/src/view/inspection/task.vue": "InspectionTask",
+   "/src/view/layout/aside/CollapseBar.vue": "AsideCollapseBar",
+   "/src/view/layout/aside/combinationMode.vue": "AsideCombinationMode",
+   "/src/view/layout/aside/headMode.vue": "AsideHeadMode",
+   "/src/view/layout/aside/index.vue": "GvaAside",
+   "/src/view/layout/aside/MobileMenuDrawer.vue": "MobileMenuDrawer",
+   "/src/view/layout/aside/normalMode.vue": "AsideNormalMode",
+   "/src/view/layout/aside/sidebarMode.vue": "SidebarMode",
+   "/src/view/layout/aside/verticalMode.vue": "VerticalMode",
+diff --git a/web/src/view/inspection/report.vue b/web/src/view/inspection/report.vue
+new file mode 100644
+index 00000000..fbf925ef
+--- /dev/null
++++ b/web/src/view/inspection/report.vue
+@@ -0,0 +1,101 @@
++<template>
++  <div class="gva-table-box">
++    <div class="gva-btn-list">
++      <el-input v-model.number="inspectionID" class="w-44" clearable placeholder="巡检ID" @keyup.enter="generate" />
++      <el-button type="primary" icon="magic-stick" :loading="generating" @click="generate">生成报告</el-button>
++      <el-input v-model="search.title" clearable class="w-48" placeholder="报告标题" @keyup.enter="loadReports" />
++      <el-button icon="search" @click="loadReports">查询</el-button>
++    </div>
++
++    <el-table :data="reports" row-key="ID">
++      <el-table-column prop="ID" label="编号" width="80" />
++      <el-table-column prop="title" label="标题" min-width="180" />
++      <el-table-column prop="inspectionId" label="巡检ID" width="100" />
++      <el-table-column prop="digest" label="摘要" min-width="260" show-overflow-tooltip />
++      <el-table-column label="来源" width="100">
++        <template #default="{ row }"><el-tag :type="row.source === 'ai' ? 'success' : 'info'">{{ row.source }}</el-tag></template>
++      </el-table-column>
++      <el-table-column prop="CreatedAt" label="生成时间" min-width="170" />
++      <el-table-column label="操作" width="180" fixed="right">
++        <template #default="{ row }">
++          <el-button link type="primary" @click="showDetail(row)">详情</el-button>
++          <el-button link type="success" @click="push(row)">推送</el-button>
++          <el-button link type="danger" @click="remove(row)">删除</el-button>
++        </template>
++      </el-table-column>
++    </el-table>
++    <div class="gva-pagination">
++      <el-pagination :current-page="page" :page-size="pageSize" :total="total" layout="total, prev, pager, next" @current-change="changePage" />
++    </div>
++
++    <el-drawer v-model="detailVisible" :title="detail?.title" size="55%">
++      <pre class="whitespace-pre-wrap break-words text-sm leading-6">{{ detail?.contentMd }}</pre>
++    </el-drawer>
++  </div>
++</template>
++
++<script setup>
++  import { ref } from 'vue'
++  import { ElMessage, ElMessageBox } from 'element-plus'
++  import { deleteReport, generateReport, getReport, getReportList, pushReport } from '@/api/inspection'
++
++  defineOptions({ name: 'InspectionReport' })
++
++  const reports = ref([])
++  const total = ref(0)
++  const page = ref(1)
++  const pageSize = 10
++  const search = ref({ title: '' })
++  const inspectionID = ref()
++  const generating = ref(false)
++  const detail = ref()
++  const detailVisible = ref(false)
++
++  const loadReports = async () => {
++    const result = await getReportList({ page: page.value, pageSize, ...search.value })
++    if (result.code === 0) {
++      reports.value = result.data.list
++      total.value = result.data.total
++    }
++  }
++  const changePage = (value) => {
++    page.value = value
++    loadReports()
++  }
++  const generate = async () => {
++    if (!inspectionID.value) {
++      ElMessage.warning('请输入巡检ID')
++      return
++    }
++    generating.value = true
++    try {
++      const result = await generateReport({ id: inspectionID.value })
++      if (result.code === 0) {
++        ElMessage.success('报告已生成')
++        loadReports()
++      }
++    } finally {
++      generating.value = false
++    }
++  }
++  const showDetail = async (report) => {
++    const result = await getReport({ id: report.ID })
++    if (result.code === 0) {
++      detail.value = result.data
++      detailVisible.value = true
++    }
++  }
++  const push = async (report) => {
++    const result = await pushReport({ id: report.ID })
++    if (result.code === 0) ElMessage.success('报告摘要已推送')
++  }
++  const remove = (report) => ElMessageBox.confirm(`删除报告 #${report.ID}？`, '确认删除', { type: 'warning' }).then(async () => {
++    const result = await deleteReport({ id: report.ID })
++    if (result.code === 0) {
++      ElMessage.success('报告已删除')
++      loadReports()
++    }
++  })
++
++  loadReports()
++</script>
